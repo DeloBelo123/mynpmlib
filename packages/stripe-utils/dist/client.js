@@ -1,0 +1,99 @@
+import { loadStripe } from "@stripe/stripe-js";
+import axios from "axios";
+/**
+ * eine function die dein produkt/Abo an das korrekte backend schickt und den
+ * user direkt in die stripe-checkout-session schickt
+ * backend-partner: sh.createCheckoutSession()
+ * @param stripePublicKey - der Stripe Public Key
+ * @param supabase - der Supabase Client
+ * @param backend  das backend wohin du dein produkt key schicken willst
+ * @param productKey der produktKey, welches ein alias für die price-id ist
+ */
+export async function handleSession({ stripePublicKey, supabase, backend, productKey, successUrl, cancelUrl, mode }) {
+    const stripe = await loadStripe(stripePublicKey);
+    if (!stripe)
+        throw new Error("Error loading stripe");
+    const { data: { user }, error: supabaseError } = await supabase.auth.getUser();
+    if (supabaseError)
+        throw new Error("Error beim user kriegen in der 'handleSession' function, Error: " + supabaseError);
+    if (!user)
+        throw new Error("No user found");
+    const SupabaseUserId = user?.id;
+    const respo = await axios.post(backend, {
+        mode,
+        productKey,
+        successUrl,
+        cancelUrl,
+        supabaseId: SupabaseUserId,
+    });
+    const sessionId = respo.data.id;
+    const { error } = await stripe?.redirectToCheckout({ sessionId });
+    if (error)
+        throw new Error("Error redirecting to checkout: " + error);
+}
+/**
+ * diese function erstellt eine billing-portal-session für den user
+ * backend-partner: sh.createBillingPortal()
+ * @param supabase - der Supabase Client
+ * @param backend das backend wohin die billing-portal-session geschickt wird
+ * @param returnUrl die url zu der der user nach der billing-portal-session zurückgeleitet wird
+ * @returns nichst, es bringt dich zur billing-portal-url
+ */
+export async function handleBillingPortal({ supabase, backend, returnUrl }) {
+    const { data: { user }, error: supabaseError } = await supabase.auth.getUser();
+    if (supabaseError)
+        throw new Error("Error beim user kriegen in der 'handleBillingPortal' function, Error: " + supabaseError);
+    if (!user)
+        throw new Error("No user found");
+    const SupabaseUserId = user?.id;
+    const respo = await axios.post(backend, {
+        supabaseId: SupabaseUserId,
+        returnUrl: returnUrl
+    });
+    window.location.href = respo.data.url;
+}
+/**
+ * diese function macht den user zu einem stripe-kunden wenn er noch keiner ist
+ * backend-partner: sh.createCustomer()
+ * @param supabase - der Supabase Client
+ * @param table die supabase table wo die stripe-id zum dazugehörigen user gespeichert wird
+ * @param backend das backend wohin die user-data geschickt wird um ihn zu einem stripe-kunden zu machen: nutze die createCustomer() methode vom stripe-handler
+ * @returns None
+ */
+export async function addStripeID({ supabase, table, backend }) {
+    const { data: { user }, error: getUserError } = await supabase.auth.getUser();
+    if (getUserError)
+        throw new Error("Error beim user kriegen in der 'addStripeID' function, Error: " + getUserError);
+    const SupabaseUserId = user?.id;
+    if (!SupabaseUserId)
+        throw new Error("No user ID found");
+    const stripeID_obj = await table.select({
+        columns: ["stripe_id"],
+        where: [{ column: "user_id", is: SupabaseUserId }],
+        first: true
+    });
+    if (stripeID_obj?.stripe_id) {
+        console.log(`User:${SupabaseUserId} hat bereits eine stripeID`);
+        return;
+    }
+    //So, wenn der code weiter läuft dann ist der user kein stripe-kunde, das fixxen wir jetzt
+    const email_obj = await table.select({
+        columns: ["email"],
+        where: [{ column: "user_id", is: SupabaseUserId }],
+        first: true
+    });
+    if (!email_obj)
+        throw new Error("user mit der id: " + SupabaseUserId + " hat keine Mail!");
+    const email = email_obj?.user_email;
+    if (!email)
+        throw new Error("No email found for user");
+    const respo = await axios.post(backend, {
+        supabaseId: SupabaseUserId,
+        email: email
+    });
+    if (!respo.data.success) {
+        throw new Error("Error beim erstellen der stripeID, Error: " + respo.data.message);
+    }
+    return respo.data.data;
+}
+//# sourceMappingURL=client.js.map

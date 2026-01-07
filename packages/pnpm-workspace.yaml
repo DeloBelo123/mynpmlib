@@ -1,0 +1,8 @@
+packages:
+  - 'ai-utils'
+  - 'base-utils'
+  - 'react-utils'
+  - 'stripe-utils'
+  - 'supabase-utils'
+
+

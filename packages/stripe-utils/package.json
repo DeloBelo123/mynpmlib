@@ -1,0 +1,28 @@
+{
+  "name": "@delofarag/stripe-utils",
+  "version": "1.0.1",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "stripe": "^14.0.0",
+    "@stripe/stripe-js": "^2.4.0"
+  },
+  "peerDependencies": {
+    "@delofarag/supabase-utils": "^1.0.1",
+    "next": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
+

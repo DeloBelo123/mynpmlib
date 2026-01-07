@@ -1,0 +1,1 @@
+{"version":3,"file":"QueryContext.d.ts","sourceRoot":"","sources":["../../src/Context/QueryContext.tsx"],"names":[],"mappings":"AACA,OAAO,KAAK,MAAM,OAAO,CAAA;AAEzB,OAAO,EAAE,SAAS,EAAE,MAAM,OAAO,CAAC;AAIlC,MAAM,CAAC,OAAO,UAAU,YAAY,CAAC,EAAC,QAAQ,EAAC,EAAC;IAAC,QAAQ,EAAC,SAAS,CAAA;CAAC,qBAMnE"}

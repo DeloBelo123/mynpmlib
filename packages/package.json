@@ -1,0 +1,19 @@
+{
+  "name": "@my/monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "publish:base": "pnpm --filter @delofarag/base-utils publish",
+    "publish:supabase": "pnpm --filter @delofarag/supabase-utils publish",
+    "publish:react": "pnpm --filter @delofarag/react-utils publish",
+    "publish:stripe": "pnpm --filter @delofarag/stripe-utils publish",
+    "publish:ai": "pnpm --filter @delofarag/ai-utils publish",
+    "publish:all": "pnpm -r publish"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
+
