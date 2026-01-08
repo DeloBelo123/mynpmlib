@@ -1,1 +1,0 @@
-{"version":3,"file":"useOnlineListener.d.ts","sourceRoot":"","sources":["../src/useOnlineListener.ts"],"names":[],"mappings":"AAGA,UAAU,sBAAsB;IAC9B,QAAQ,EAAE,CAAC,GAAG,IAAI,EAAE,GAAG,EAAE,KAAK,IAAI,CAAA;IAClC,SAAS,EAAE,CAAC,GAAG,IAAI,EAAE,GAAG,EAAE,KAAK,IAAI,CAAA;CACpC;AAED,MAAM,CAAC,OAAO,UAAU,iBAAiB,CAAC,EAAC,QAAQ,EAAE,SAAS,EAAC,EAAE,sBAAsB,QAmEtF"}
