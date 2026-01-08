@@ -1,11 +1,14 @@
 # Dependencies
 node_modules/
+**/node_modules/
 .pnp
 .pnp.js
 
 # Build outputs
 dist/
+**/dist/
 build/
+**/build/
 *.tsbuildinfo
 
 # Environment variables

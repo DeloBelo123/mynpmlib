@@ -2,8 +2,8 @@ import { Chain,Agent,MemoryChain,Chatbot,getLLM, SmartCheckpointSaver } from "..
 import dotenv from "dotenv";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { MemorySaver } from "../../ai-utils/src/imports";
-
+import { MemorySaver, SqliteSaver } from "../../ai-utils/src/imports";
+import { toolRegistry } from "./registry-test";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: resolve(__dirname, "../../.env") });
@@ -14,10 +14,13 @@ dotenv.config({ path: resolve(__dirname, "../../.env") });
         apikey: process.env.CHATGROQ_API_KEY!
     })
 
-    const chain = new MemoryChain({
-        llm:llm,
-        prompt:"du bist ein sehr trauriger und trüber mensch der nur am säufzen ist",
-        memory: new SmartCheckpointSaver(new MemorySaver(), { llm: llm }) as any
+    const chain = new Chatbot({
+        llm: llm,
+        prompt: "du bist ein super aufgeregter assistent der die ganze Zeit 'heheheh' mitten im Gespräch ausgibt aber sich danach direkt entschuldigt",
+        memory: new SmartCheckpointSaver(new MemorySaver(), { llm: llm }),
+        tools: toolRegistry.allTools
     })
     
+    await chain.session()
+
 })()
