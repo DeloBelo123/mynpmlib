@@ -52,3 +52,4 @@ const users = await usersTable.select({ columns: ["*"] })
 - `addUser()` - Add user to table
 
 
+
