@@ -1,5 +1,5 @@
 import { SupabaseTable } from "@delofarag/supabase-utils"
-import { summarize, getLLM, Prettify } from "./helpers"
+import { getLLM, Prettify, createChain } from "./helpers"
 import {
     BaseCheckpointSaver,
     BaseMessage,
@@ -14,7 +14,9 @@ import {
     type CheckpointTuple,
     type CheckpointListOptions,
     type PendingWrite,
-    type ChannelVersions
+    type ChannelVersions,
+    StringOutputParser,
+    ChatPromptTemplate
 } from "./imports"
 
 interface CheckpointRow {
@@ -258,7 +260,7 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
         
         // Erstelle Zusammenfassung
         const conversationText = this.messagesToText(messagesToSummarize)
-        const summary = await summarize({
+        const summary = await chatSummarizer({
             conversation: conversationText,
             llm: this.llm,
             maxWords: 150
@@ -364,4 +366,39 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
     async deleteThread(threadId: string): Promise<void> {
         return await this.checkpointSaver.deleteThread(threadId)
     }
+}
+
+/**
+ * fasst eine Chat-Konversation zwischen User und Assistant zusammen
+ */
+export async function chatSummarizer({
+    conversation,
+    fokuss,
+    llm,
+    maxWords = 150
+}: {
+    conversation: string,
+    fokuss?: string,
+    llm: BaseChatModel,
+    maxWords?: number
+}): Promise<string> {
+    const focusMessage: Array<["system", string]> = fokuss 
+        ? [["system", `Fokussiere dich besonders auf die folgenden Themen:\n${fokuss}`]]
+        : []
+    
+    const prompt = ChatPromptTemplate.fromMessages([
+        ["system", `Du fasst eine Chat-Konversation zwischen User und Assistant zusammen.
+          WICHTIG:
+          - Behalte ALLE wichtigen Fakten: Namen, Präferenzen, Entscheidungen, Vereinbarungen
+          - Behalte chronologischen Kontext wo relevant für Verständnis
+          - Fasse auf max. ${maxWords} Wörter zusammen
+          - Format: Kurze, prägnante Zusammenfassung ohne Bullet-Points
+          - Ignoriere Small-Talk, fokussiere auf inhaltliche Punkte`],
+        ...focusMessage,
+        ["human", "{conversation}"]
+    ])
+    
+    const chain = createChain(prompt, llm, new StringOutputParser())
+    const result = await chain.invoke({ conversation })
+    return typeof result === "string" ? result : String(result)
 }

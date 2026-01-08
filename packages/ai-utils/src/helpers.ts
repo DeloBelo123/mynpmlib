@@ -102,37 +102,229 @@ export async function structure<T extends z.ZodObject<any, any>>({
     throw new Error(`structure() failed after ${retries + 1} attempts, Error: ${lastError?.message}`)
 }
 
-/**
- * fasst eine Chat-Konversation zwischen User und Assistant zusammen
- */
 export async function summarize({
-    conversation,
-    fokuss,
-    llm,
-    maxWords = 150
-}: {
-    conversation: string,
-    fokuss?: string,
-    llm: BaseChatModel,
-    maxWords?: number
-}): Promise<string> {
-    const focusMessage: Array<["system", string]> = fokuss 
-        ? [["system", `Fokussiere dich besonders auf die folgenden Themen:\n${fokuss}`]]
-        : []
-    
+  llm,
+  data,
+  fokuss,
+  maxWords = 150
+}:{
+  llm:BaseChatModel,
+  data:any,
+  fokuss?:string,
+  maxWords?:number
+}):Promise<string>{
+    const inputString = typeof data === "string" ? data : JSON.stringify(data, null, 2)
     const prompt = ChatPromptTemplate.fromMessages([
-        ["system", `Du fasst eine Chat-Konversation zwischen User und Assistant zusammen.
-          WICHTIG:
-          - Behalte ALLE wichtigen Fakten: Namen, Präferenzen, Entscheidungen, Vereinbarungen
-          - Behalte chronologischen Kontext wo relevant für Verständnis
-          - Fasse auf max. ${maxWords} Wörter zusammen
-          - Format: Kurze, prägnante Zusammenfassung ohne Bullet-Points
-          - Ignoriere Small-Talk, fokussiere auf inhaltliche Punkte`],
-        ...focusMessage,
-        ["human", "{conversation}"]
+      ["system", `
+        Du bist ein analytischer Summarizer.
+        
+        Deine Aufgabe:
+        - Fasse den gegebenen Input präzise, sachlich und faktengetreu zusammen.
+        - Entferne Wiederholungen, irrelevante Details und Ausschmückungen.
+        - Behalte ausschließlich die inhaltlich wichtigsten Punkte.
+        
+        Priorisierungsregeln (zwingend):
+        1. Zentrale Aussagen, Probleme oder Ergebnisse
+        2. Wichtige Entscheidungen, Risiken oder Konsequenzen
+        3. Relevanter Kontext (nur wenn nötig zum Verständnis)
+        4. Alles andere weglassen
+        
+        Regeln:
+        - Erfinde keine Informationen
+        - Triff keine Annahmen über fehlende Daten
+        - Nutze nur Informationen aus dem Input
+        - Keine Meta-Kommentare („der Text beschreibt…“)
+        
+        Längenbegrenzung:
+        - Maximal ${maxWords} Wörter
+        - Wenn nötig, kürze aggressiv
+        
+        ${fokuss ? `
+        Fokus (höchste Priorität):
+        - ${fokuss}
+        Informationen außerhalb dieses Fokus nur erwähnen, wenn sie essenziell sind.
+        ` : ""}
+        
+        Gib nur die Zusammenfassung aus. Kein zusätzlicher Text.
+        `],
+        ["human","{input}"]
     ])
-    
-    const chain = createChain(prompt, llm, new StringOutputParser())
-    const result = await chain.invoke({ conversation })
+    const chain = createChain(prompt,llm,new StringOutputParser())
+    const result = await chain.invoke({ input:inputString })
     return typeof result === "string" ? result : String(result)
 }
+
+const decideSchema = z.object({
+  decision: z.enum(["yes", "no", "unclear"])
+    .describe("Ergebnis der Entscheidung basierend auf dem Kriterium"),
+  reason: z.string()
+    .describe("Sachliche Begründung, die sich ausschließlich auf das gegebene Material bezieht"),
+  confidence: z.number()
+    .min(0)
+    .max(100)
+    .describe(
+      "Sicherheit der Entscheidung. Regeln: " +
+      "decision='unclear' → confidence=0. " +
+      "decision='yes' oder 'no' → confidence > 0"
+    )
+})
+
+export async function decide({
+  llm,
+  material,
+  kriteria_to_decide
+}: {
+  llm: BaseChatModel
+  material: any
+  kriteria_to_decide: string
+}): Promise<z.infer<typeof decideSchema>> {
+
+  const inputString =
+    typeof material === "string"
+      ? material
+      : JSON.stringify(material, null, 2)
+
+  const jsonParser = StructuredOutputParser.fromZodSchema(decideSchema)
+  const prompt = await ChatPromptTemplate.fromMessages([
+    ["system", `
+      Analytischer Entscheidungsagent.
+      
+      Entscheide anhand des Materials und des Kriteriums:
+      - Ergebnis: "yes" | "no" | "unclear"
+      - "unclear", wenn keine klare Entscheidung möglich ist
+      - Begründung nur aus dem Material
+      
+      Regeln:
+      - Keine Annahmen oder erfundenen Infos
+      - decision="unclear" → confidence<10
+      - decision≠"unclear" → confidence>10
+      - Nur JSON gemäß Schema
+      
+      Kriterium:
+      ${kriteria_to_decide}
+      
+      Schema:
+      {format_instructions}
+      `],      
+    ["human", "{input}"]
+  ]).partial({
+    format_instructions: jsonParser.getFormatInstructions()
+  })
+  const chain = createChain(prompt, llm, jsonParser)
+  const result = await chain.invoke({ input: inputString })
+  return decideSchema.parse(result)
+}
+
+export async function extract<T extends z.ZodObject<any>>({
+  llm,
+  data,
+  goal,
+  schema
+}: {
+  llm: BaseChatModel
+  data: any
+  goal?: string
+  schema: T
+}): Promise<z.infer<T>> {
+
+  const inputString = typeof data === "string"
+    ? data
+    : JSON.stringify(data, null, 2)
+
+  const parser = StructuredOutputParser.fromZodSchema(schema)
+  const prompt = await ChatPromptTemplate.fromMessages([
+    ["system", `
+      Du bist ein präziser Informationsextraktor.
+
+      
+        ${goal ? `
+      Ziel:
+      Extrahiere ausschließlich die Informationen, die für folgendes Ziel relevant sind: 
+      - "${goal}"` 
+      :
+       "- Extrahiere ALLE Informationen aus dem Input, die zum angegebenen Schema passen."}
+
+      Regeln:
+      - Keine Interpretation
+      - Keine Ergänzungen
+      - Nur Informationen, die explizit im Input enthalten sind
+      - Antworte ausschließlich im JSON-Schema
+
+      Schema:
+      {format_instructions}
+          `],
+    ["human", "{input}"]
+  ]).partial({ format_instructions: parser.getFormatInstructions() })
+  const chain = createChain(prompt, llm, parser)
+  const result = await chain.invoke({ input: inputString })
+  return schema.parse(result)
+}
+
+function createClassificationSchema<T extends readonly [string, ...string[]]>(classes: T) {
+  return z.object({
+    class: z.enum(classes),
+    confidence: z.number()
+      .min(0)
+      .max(100)
+      .describe("Sicherheit der Klassifikation"),
+    reasoning: z.string()
+      .describe("Kurze Begründung basierend auf dem Input")
+  })
+}
+
+export async function classify<T extends readonly [string, ...string[]]>({
+  llm,
+  data,
+  classes
+}: {
+  llm: BaseChatModel
+  data: any
+  classes: T
+}): Promise<z.infer<ReturnType<typeof createClassificationSchema<T>>>> {
+
+  const inputString =
+    typeof data === "string"
+      ? data
+      : JSON.stringify(data, null, 2)
+
+  const schema = createClassificationSchema(classes)
+  const parser = StructuredOutputParser.fromZodSchema(schema)
+
+  const prompt = await ChatPromptTemplate.fromMessages([
+    ["system", `
+      Du bist ein präziser Klassifizierungsagent.
+
+      Aufgabe:
+      - Ordne den gegebenen Input exakt EINER der folgenden Klassen zu:
+      ${classes.map(c => `- ${c}`).join("\n")}
+
+      Regeln:
+      - Wähle genau eine Klasse
+      - Nutze nur Informationen aus dem Input
+      - Keine Annahmen oder erfundene Inhalte
+      - Wenn die Zuordnung unsicher ist, wähle die wahrscheinlichste Klasse und setze eine niedrige Confidence
+
+      Confidence:
+      - 0 = reine Vermutung
+      - 100 = absolut sicher
+
+      Antwort:
+      - Ausschließlich valides JSON gemäß Schema
+      - Kein zusätzlicher Text
+
+      Schema:
+      {format_instructions}
+      `],
+    ["human", "{input}"]
+  ]).partial({
+    format_instructions: parser.getFormatInstructions()
+  })
+
+  const chain = createChain(prompt, llm, parser)
+  const result = await chain.invoke({ input: inputString })
+
+  return schema.parse(result)
+}
+
+
+
