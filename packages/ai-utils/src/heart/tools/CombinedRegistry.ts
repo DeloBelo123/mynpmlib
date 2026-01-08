@@ -21,8 +21,8 @@ type ExtractToolNamesFromZodiosApi<Api extends readonly any[]> = {
         : never
 }[number]
 
-type ExtractToolNamesFromInput<T extends readonly (Tool | Zodios<any>)[]> = {
-    [K in keyof T]: T[K] extends Tool
+type ExtractToolNamesFromInput<T extends readonly (Tool<any> | Zodios<any>)[]> = {
+    [K in keyof T]: T[K] extends Tool<any>
         ? T[K]['name']
         : T[K] extends Zodios<infer Api>
         ? ExtractToolNamesFromZodiosApi<ApiOf<T[K]>>
@@ -35,8 +35,8 @@ type ExtractToolNamesFromInput<T extends readonly (Tool | Zodios<any>)[]> = {
 /**
  * vergiss nicht 'as const' am ende des input-arrays zu verwenden für perekten autocomplete!!!
  */
-export class CombinedToolRegistry<T extends readonly (Tool | Zodios<any>)[]> {
-    private BaseToolRegistry:ToolRegistry<Tool[]> | undefined
+export class CombinedToolRegistry<T extends readonly (Tool<any> | Zodios<any>)[]> {
+    private BaseToolRegistry:ToolRegistry<Tool<any>[]> | undefined
     private ZodiosToolRegistry:ZodiosToolRegistry<Zodios<any>> | undefined
     private tools:DynamicStructuredTool[]
 

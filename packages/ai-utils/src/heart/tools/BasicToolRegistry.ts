@@ -2,17 +2,17 @@ import { DynamicStructuredTool } from "@langchain/core/tools"
 import type { ExtractToolNames } from "./CombinedRegistry"
 import { z } from "zod/v3"
 
-export interface Tool {
+export interface Tool<T extends z.ZodObject<any,any>> {
     name:string
     description:string
-    schema:z.AnyZodObject
-    func:(...args:any[]) => any
+    schema:T
+    func:(input:z.infer<T>) => any
 }
 
 /**
  * vergiss nicht 'as const' am ende des input-arrays zu verwenden für perekten autocomplete!!!
  */
-export class ToolRegistry<T extends Tool[]> {
+export class ToolRegistry<T extends readonly Tool<z.ZodObject<any,any>>[]> {
     private tools:DynamicStructuredTool[]
     constructor(tools:T){
         this.tools = tools.map(tool => tool instanceof DynamicStructuredTool ? tool : this.turnToTool(tool)) 
@@ -37,7 +37,7 @@ export class ToolRegistry<T extends Tool[]> {
         return names.map(name => this.getTool(name))
     }
 
-    private turnToTool(tool:Tool):DynamicStructuredTool{
+    private turnToTool<U extends z.ZodObject<any,any>>(tool:Tool<U>):DynamicStructuredTool{
         return new DynamicStructuredTool({
             name:tool.name,
             description:tool.description,

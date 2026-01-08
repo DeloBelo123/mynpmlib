@@ -22,12 +22,7 @@ interface AgentProps<T extends z.ZodObject<any,any>>{
 /**
  * CONSTRUCTOR:
  * @example constructor({
-        prompt = `Du bist ein hilfreicher Assistent. 
-            WICHTIG: 
-            - Nutze Tools NUR wenn nötig
-            - Nach jedem Tool-Call gib eine finale Antwort
-            - Stoppe nach der Antwort, rufe keine Tools mehr auf
-            - Wenn du die Antwort hast, gib sie direkt zurück`,
+        prompt = `Du bist ein hilfreicher Assistent.`,
         tools,
         llm,
         schema,
@@ -36,6 +31,11 @@ interface AgentProps<T extends z.ZodObject<any,any>>{
         this.prompt = typeof prompt === "string" ? [["system", prompt]] : Array.isArray(prompt) ? prompt.map((p:string)=>{
             return ["system", p]
         }) : []
+        this.prompt.push(["system",`WICHTIG: 
+            - Nutze Tools NUR wenn nötig
+            - Nach jedem Tool-Call: Prüfe ob du die vollständige Antwort hast oder ob du noch weitere Tools brauchst
+            - Wenn du die vollständige Antwort hast, gib sie direkt zurück und rufe keine weiteren Tools auf
+            - Vermeide unnötige Tool-Calls, die dem user nichts bringen`])
         this.tools = tools
         this.llm = llm
         this.schema = schema
@@ -55,12 +55,7 @@ export class Agent<T extends z.ZodObject<any,any>> {
     private should_use_schema: boolean = true
 
     constructor({
-        prompt = `Du bist ein hilfreicher Assistent. 
-            WICHTIG: 
-            - Nutze Tools NUR wenn nötig
-            - Nach jedem Tool-Call gib eine finale Antwort
-            - Stoppe nach der Antwort, rufe keine Tools mehr auf
-            - Wenn du die Antwort hast, gib sie direkt zurück`,
+        prompt = `Du bist ein hilfreicher Assistent.`,
         tools,
         llm,
         schema,
@@ -69,6 +64,11 @@ export class Agent<T extends z.ZodObject<any,any>> {
         this.prompt = typeof prompt === "string" ? [["system", prompt]] : Array.isArray(prompt) ? prompt.map((p:string)=>{
             return ["system", p]
         }) : []
+        this.prompt.push(["system",`WICHTIG: 
+            - Nutze Tools NUR wenn nötig
+            - Nach jedem Tool-Call: Prüfe ob du die vollständige Antwort hast oder ob du noch weitere Tools brauchst
+            - Wenn du die vollständige Antwort hast, gib sie direkt zurück und rufe keine weiteren Tools auf
+            - Vermeide unnötige Tool-Calls, die dem user nichts bringen`])
         this.tools = tools
         this.llm = llm
         this.schema = schema
@@ -78,8 +78,8 @@ export class Agent<T extends z.ZodObject<any,any>> {
     public async invoke(invokeInput: Record<string, any> & { thread_id?: string, debug?: boolean }): Promise<T extends undefined ? string : z.infer<T>> {
         const { thread_id, debug, ...variables } = invokeInput
 
-        if(this.vectorStore && !thread_id) throw new Error("thread_id is required when using a vector store, else no memory is stored")
-        if(!this.vectorStore && thread_id) console.warn("thread_id is provided but no vector store is set, so no memory is stored")
+        if(this.memory && !thread_id) throw new Error("thread_id is required when using a vector store, else no memory is stored")
+        if(!this.memory && thread_id) console.warn("thread_id is provided but no vector store is set, so no memory is stored")
         
         const humanMessages: HumanMessage[] = Object.entries(variables).map(
             ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)

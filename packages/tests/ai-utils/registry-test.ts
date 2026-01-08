@@ -8,15 +8,13 @@ export const toolRegistry = new ToolRegistry([
         schema:z.object({
             city:z.string()
         }),
-        func:async(city:string)=>{
+        func:async({city})=>{
             return `the weather of ${city} is sunny`
         }
     },{
         name:"get_time",
         description:"get the time",
-        schema:z.object({
-            time:z.string()
-        }),
+        schema:z.object({}),
         func:async()=>{
             return `the time is ${new Date().toLocaleTimeString()}`
         }
@@ -26,7 +24,7 @@ export const toolRegistry = new ToolRegistry([
         schema:z.object({
             news:z.string()
         }),
-        func:async(news:string)=>{
+        func:async({news})=>{
             return `the news is ${news}`
         }
     }
