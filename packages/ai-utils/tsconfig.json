@@ -1,14 +1,14 @@
 {
   "extends": "../tsconfig.json",
-  "compilerOptions": {
-    "outDir": "dist",
+    "compilerOptions": {
+      "outDir": "dist",
     "rootDir": "src",
     "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "skipLibCheck": true
-  },
+      "resolveJsonModule": true,
+      "skipLibCheck": true
+    },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "*.db", "*.sqlite", "sqlite-test"]
-}
+    "exclude": ["node_modules", "dist", "*.db", "*.sqlite", "sqlite-test"]
+  }
   
 

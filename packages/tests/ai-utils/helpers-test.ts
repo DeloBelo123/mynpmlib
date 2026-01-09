@@ -1,4 +1,4 @@
-import { summarize, getLLM, decide, extract, classify } from "../../ai-utils/src";
+import { summarize, getLLM, decide, extract, classify, ragify, promptify } from "../../ai-utils/src";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { resolve, dirname } from "path";
@@ -12,27 +12,10 @@ const llm = getLLM({
     apikey: process.env.CHATGROQ_API_KEY!,
 })
 
-const data = {
 
-    "meeting": {
-      "title": "Product Launch Sync"
-    },
-    "discussion": [
-      {
-        "speaker": "CTO",
-        "text": "If we launch without fixing onboarding, we risk high churn after the trial."
-      },
-      {
-        "speaker": "Product",
-        "text": "The onboarding flow is only 60% complete."
-      }
-    ]
-  }
-  
+const request = "prompte meinen Finanz agent so das er am optimalsten den markt analysiert"
 
 
-async function main(){
-  console.log((await classify({llm,data,classes:["noise", "informational", "needs_decision"] as const})) )
-}
-
-main()
+;(async()=>{
+    console.log( await promptify({ request, agentRole:"Finanz-Agent" }))
+})()

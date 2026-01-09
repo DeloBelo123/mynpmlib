@@ -1,5 +1,5 @@
 import { SupabaseTable } from "@delofarag/supabase-utils"
-import { getLLM, Prettify, createChain } from "./helpers"
+import { createSimpleChain } from "./helpers"
 import {
     BaseCheckpointSaver,
     BaseMessage,
@@ -398,7 +398,7 @@ export async function chatSummarizer({
         ["human", "{conversation}"]
     ])
     
-    const chain = createChain(prompt, llm, new StringOutputParser())
+    const chain = createSimpleChain(prompt, llm, new StringOutputParser())
     const result = await chain.invoke({ conversation })
     return typeof result === "string" ? result : String(result)
 }
