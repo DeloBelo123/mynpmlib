@@ -7,7 +7,7 @@ import { turn_to_docs } from "../rag"
 import { createReactAgent } from "../imports"
 import { HumanMessage} from "../imports"
 import { stream } from "../helpers"
-import { structure } from "../functions/parsers/structure"
+import { structure } from "../magic-funcs/parsers/structure"
 
 interface AgentProps<T extends z.ZodObject<any,any>>{
     prompt?: string | Array<string>
