@@ -10,5 +10,9 @@ export async function ask(input:string | {llm:BaseChatModel, question:string}){
       ["human", "{input}"]
     ])
     const chain = createSimpleChain(prompt, llm, new StringOutputParser())
-    return await chain.invoke({ input })
+    if(typeof input === "string"){
+      return await chain.invoke({ input })
+    } else {
+      return await chain.invoke({ input: input.question})
+    }
   }

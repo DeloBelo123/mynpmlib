@@ -6,7 +6,7 @@ export async function websearch(query:string){
     const topic = await classify({
       data:query,
       classes:["general","news","finance"] as const,
-      context:"die query soll in einem websearch verwendet werden, um relevante informationen zu finden, welcher gegebenen klasse passt er am besten?"
+      context:"die query soll in einem websearch verwendet werden, um relevante informationen zu finden, welcher gegebenen klasse passt der am besten?"
     })
     const tavily = new TavilySearch({
       maxResults:10,
