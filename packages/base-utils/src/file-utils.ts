@@ -10,7 +10,7 @@ function getProjectRoot(): string {
 }
 
 // creating and reading
-export async function create_file(file: string, content: string): Promise<boolean>{
+export async function createFile(file: string, content: string): Promise<boolean>{
     try{
         await fs.writeFile(file, content, 'utf-8')
         console.log(`die Datei: '${file}' wurde erstellt`)
@@ -21,7 +21,7 @@ export async function create_file(file: string, content: string): Promise<boolea
     }
 }
 
-export async function create_sub_file(pathStr: string, content: string): Promise<boolean> {
+export async function createSubFile(pathStr: string, content: string): Promise<boolean> {
     const dir = path.dirname(pathStr)
     try{
         await fs.mkdir(dir, { recursive: true })
@@ -34,7 +34,7 @@ export async function create_sub_file(pathStr: string, content: string): Promise
     }
 }
 
-export async function read_file(file: string): Promise<string> {
+export async function readFile(file: string): Promise<string> {
     let filePath = path.resolve(file)
     
     if (!path.isAbsolute(file)) {
@@ -59,7 +59,7 @@ export async function read_file(file: string): Promise<string> {
     return content
 }
 
-export async function read_all_files_in_dir(dir: string): Promise<string[]> {
+export async function readAllFilesInDir(dir: string): Promise<string[]> {
     const dirPath = path.join(getProjectRoot(), dir)
     const files: string[] = []
     
@@ -84,14 +84,14 @@ export async function read_all_files_in_dir(dir: string): Promise<string[]> {
     return files
 }
 
-export async function read_file_lines(file: string): Promise<string[]> {
+export async function readFileLines(file: string): Promise<string[]> {
     const content = await fs.readFile(file, 'utf-8')
     const lines = content.split('\n')
     console.log(`die Datei: '${file}' wurde Zeile für Zeile ausgelesen und in ein array gepackt`)
     return lines
 }
 
-export async function add_to_file(file: string, content: string): Promise<boolean> {
+export async function addToFile(file: string, content: string): Promise<boolean> {
     try{
         await fs.appendFile(file, `\n${content}`, 'utf-8')
         console.log(`in Datei: '${file}' wurde Inhalt: '${content}' hinzugefügt`)
@@ -102,7 +102,7 @@ export async function add_to_file(file: string, content: string): Promise<boolea
     }
 }
 
-export async function does_file_exist(file: string): Promise<boolean> {
+export async function doesFileExist(file: string): Promise<boolean> {
     try {
         await fs.access(file)
         console.log(`die Datei: '${file}' exestiert`)
@@ -119,7 +119,7 @@ export async function write_n_run(
     content: string,
     interpreter: string,
     is_subfile: boolean = false,
-    aus_führen: boolean = false
+    ausführen: boolean = false
 ): Promise<string> {
     const filePath = path.resolve(file)
     
@@ -129,9 +129,9 @@ export async function write_n_run(
     }
     
     await fs.writeFile(filePath, content, 'utf-8')
-    console.log(`der ${interpreter} Code-Datei: '${file}' wurde erstellt`)
+    console.log(`die ${interpreter} Code-Datei: '${file}' wurde erstellt`)
     
-    if (aus_führen) {
+    if (ausführen) {
         await execAsync(`${interpreter} ${filePath}`)
         console.log(`die ${interpreter} Code-Datei: '${file}' wird ausgeführt`)
     }
@@ -158,7 +158,7 @@ export async function write_n_run_js(
 }
 
 // removing
-export async function remove_file(file: string): Promise<boolean> {
+export async function removeFile(file: string): Promise<boolean> {
     try {
         await fs.unlink(file)
         console.log(`die Datei: '${file}' wurde gelöscht`)
@@ -166,17 +166,6 @@ export async function remove_file(file: string): Promise<boolean> {
     } catch(e) {
         // Datei existiert nicht oder kann nicht gelöscht werden
         console.error(`Fehler beim Löschen der Datei: '${file}': ${e}`)
-        return false
-    }
-}
-
-export async function remove_empty_dir(dir: string): Promise<boolean> {
-    try {
-        await fs.rmdir(dir)
-        console.log(`der leere Ordner: '${dir}' wird entfernt`)
-        return true
-    } catch(e) {
-        console.error(`Fehler beim Entfernen des leeren Ordners: '${dir}': ${e}`)
         return false
     }
 }

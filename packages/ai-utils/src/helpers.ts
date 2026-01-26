@@ -62,3 +62,12 @@ export function getLLM(config: LLMConfig) {
       throw new Error("Unknown LLM kind");
   }
 }
+
+export function outputschema(zodschema: z.ZodObject<any>): {
+  prompt: string
+  parser: StructuredOutputParser<any>
+} {
+  const parser = StructuredOutputParser.fromZodSchema(zodschema)
+  const prompt = `You MUST respond ONLY with valid JSON matching this exact schema:\n${parser.getFormatInstructions()}\n\nIMPORTANT: \n- Output ONLY valid JSON, no markdown code blocks\n- No backslashes or line breaks in strings\n- All strings must be on single lines\n- Do NOT wrap in \`\`\`json\`\`\` blocks\n- Return the JSON object DIRECTLY`
+  return { prompt,parser }
+}

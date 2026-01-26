@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { UUID } from "crypto";
 
 export type SupabaseServerConfig = {
     url: string
@@ -19,9 +20,9 @@ export class SupabaseTable<T extends Record<string,any>> {
     public structure?:T
     private supabase: SupabaseClient
     
-    constructor(tableName:string, supabase: SupabaseClient){
+    constructor(tableName:string, supabase?: SupabaseClient){
         this.tableName = tableName
-        this.supabase = supabase
+        this.supabase = supabase ?? createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
     }
     /**
      * @param rows - die neuen Zeilen die du in die Tabelle einfügen möchtest, als Array von Objekten, wo jedes Objekt eine Zeile ist
@@ -46,21 +47,21 @@ export class SupabaseTable<T extends Record<string,any>> {
     // funcitonal overloading
     async select({columns , where, ordered_by, limited_to}:{
         columns:Array<keyof T | "*">, 
-        where?:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | undefined}>,
+        where?:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | UUID | undefined}>,
         ordered_by?:{column:keyof T | (string & {}), descending:boolean},
         limited_to?:number,
         first?:false
     }): Promise<Array<Record<keyof T,any>>>
     async select({columns , where, ordered_by, limited_to}:{
         columns:Array<keyof T | "*">, 
-        where?:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | undefined}>,
+        where?:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | UUID | undefined}>,
         ordered_by?:{column:keyof T | (string & {}), descending:boolean},
         limited_to?:number,
         first:true
     }): Promise<Record<keyof T,any> | null>
     async select({columns , where, ordered_by, limited_to, first = false}:{
         columns:Array<keyof T | "*">, 
-        where?:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | undefined}>,
+        where?:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | UUID | undefined}>,
         ordered_by?:{column:keyof T | (string & {}), descending:boolean},
         limited_to?:number,
         first?:boolean
@@ -121,7 +122,7 @@ export class SupabaseTable<T extends Record<string,any>> {
      * @param where - die Filter die genau sagen welche Zeile sich aktualisieren soll, sonst wird jede Zeile aktualisiert!!!
      * @returns die geupdateten Zeilen, also die Zeilen die du aktualisiert hast
      */
-    async update({where,update}:{ where:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | undefined}>, update:NestedUpdate<T> }){
+    async update({where,update}:{ where:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | UUID | undefined}>, update:NestedUpdate<T> }){
         // 1. Objekt flach machen (Dot-Notation für JSON-Properties)
         const flatUpdate = this.flattenNested(update as Record<string, any>);
         
