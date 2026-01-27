@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { logger } from "@delofarag/base-utils"
 import { UUID } from "crypto";
 
 export type SupabaseServerConfig = {
@@ -22,7 +23,7 @@ export class SupabaseTable<T extends Record<string,any>> {
     
     constructor(tableName:string, supabase?: SupabaseClient){
         this.tableName = tableName
-        this.supabase = supabase ?? createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+        this.supabase = supabase ?? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
     }
     /**
      * @param rows - die neuen Zeilen die du in die Tabelle einfügen möchtest, als Array von Objekten, wo jedes Objekt eine Zeile ist
@@ -188,6 +189,26 @@ export class SupabaseTable<T extends Record<string,any>> {
         }
 
         return data;
+    }
+
+
+    public async getRows({...values}:Partial<T>){
+        return await this.select({
+            columns:["*"],
+            where:Object.keys(values).map(key => ({column:key as keyof T,is:(values as any)[key]})),
+        })
+    }
+    public async getRow({...values}:Partial<T>){
+        const row = await this.getRows({...values})
+        if(row.length > 1){
+            logger.error("Multiple rows found for values: " + JSON.stringify(values) + ", returning null")
+            return null
+        }
+        if(row && row.length === 0){
+            logger.error("No row found for values: " + JSON.stringify(values) + ", returning null")
+            return null
+        }
+        return row[0]
     }
 }
 

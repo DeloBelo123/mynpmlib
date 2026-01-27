@@ -16,37 +16,39 @@ type ruleFn = (input:any) => boolean
 const user:User = {
     name: "John Doe",
     age: 20,
-    email: "john.doe@example.com",
+    email: "john.doe@exampl.com",
     is_admin: false,
     has_payed: false,
     tier: "free"
 }
 
  * const rule = Rule
-    .from(user => user.age > 18)
+    .is(user => user.age > 18) //man kann hier auch mit "is<User>(user => ...)" typisieren
     .and(user => !user.is_admin)
     .and(user => user.has_payed)
-    .or(Rule.from(user => user.tier === "free")
+    .or(Rule
+        .is(user => user.tier === "free")
         .and(user => !user.has_payed)
         .and(user => user.age === 21))
-    .or(Rule.from(user => user.name === "John Doe")
+    .or(Rule
+        .is(user => user.name === "John Doe")
         .and(user => user.age === 20)
-        .and(user => user.email === "john.doe@example.com"))
+        .and(user => user.email === "john.doe@exampl.com"))
 
     console.log(rule.allows(user)) // returned true
  */
-export class Rule {
+export class Rule<T = any> {
     private root:ruleFn
     private and_rules:ruleFn[] = []
     private or_rules:Rule[] = []
     
-    private constructor(root:(input:any) => boolean){
+    private constructor(root:(input:T) => boolean){
         this.root = root
     }
-    public static from(root:(input:any) => boolean){
+    public static is<T = any>(root:(input:T) => boolean){
         return new Rule(root)
     }
-    public and(fn:(input:any) => boolean){
+    public and(fn:(input:T) => boolean){
         this.and_rules.push(fn)
         return this
     }
@@ -54,7 +56,7 @@ export class Rule {
         this.or_rules.push(rule)
         return this
     }
-    public allows(input:any):boolean{
+    public allows(input:T):boolean{
         let result;
         result = this.root(input)
 
@@ -96,14 +98,17 @@ const user:User = {
 }
 
 const rule = Rule
-    .from(user => user.age > 18)
+    .is(user => user.age > 18)
     .and(user => !user.is_admin)
     .and(user => user.has_payed)
-    .or(Rule.from(user => user.tier === "free")
+    .or(Rule
+        .is(user => user.tier === "free")
         .and(user => !user.has_payed)
         .and(user => user.age === 21))
-    .or(Rule.from(user => user.name === "John Doe")
+    .or(Rule
+        .is(user => user.name === "John Doe")
         .and(user => user.age === 20)
         .and(user => user.email === "john.doe@example.com"))
+
 
 console.log(rule.allows(user))

@@ -4,11 +4,10 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { MemorySaver, SqliteSaver } from "../../ai-utils/src/imports";
 import { toolRegistry } from "./registry-test";
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-dotenv.config({ path: resolve(__dirname, "../../.env") });
+import global_load_envs from "../load_envs";
+global_load_envs()
 
-(async()=>{
+;(async()=>{
     const llm = getLLM({
         type:"groq",
         apikey: process.env.CHATGROQ_API_KEY!

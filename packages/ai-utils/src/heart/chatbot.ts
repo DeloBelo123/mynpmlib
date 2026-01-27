@@ -94,6 +94,7 @@ export class Chatbot {
             }
             messages = messages + 2
             if(messages > numberOfMessages){
+                console.log(`Message-limit of ${numberOfMessages} reached, stopping session`)
                 break
             }
         }

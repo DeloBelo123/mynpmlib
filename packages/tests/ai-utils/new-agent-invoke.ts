@@ -1,16 +1,12 @@
 import { Agent, getLLM, DEFAULT_SCHEMA,  } from "../../ai-utils/src";
 import { DynamicStructuredTool } from "../../ai-utils/src/imports";
 import { toolRegistry } from "./registry-test";
-import dotenv from "dotenv";
 import { z } from "zod/v3"
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
 import { MemorySaver, SqliteSaver } from "../../ai-utils/src/imports";
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-dotenv.config({ path: resolve(__dirname, "../../.env") });
+import global_load_envs from "../load_envs"
+global_load_envs()
 
-(async()=>{
+;(async()=>{
     const llm = getLLM({
         type:"groq",
         apikey: process.env.CHATGROQ_API_KEY!,

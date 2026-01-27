@@ -1,5 +1,7 @@
 import { ToolRegistry } from "../../ai-utils/src";
 import { z } from "zod/v3";
+import global_load_envs from "../load_envs"
+global_load_envs()
 
 export const toolRegistry = new ToolRegistry([
     {

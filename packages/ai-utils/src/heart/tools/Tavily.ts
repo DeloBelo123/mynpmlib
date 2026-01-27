@@ -1,9 +1,9 @@
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 
-export type TavilyTopic = "general" | "news" | "finance";
-export type TavilySearchDepth = "basic" | "advanced";
-export type TavilyTimeRange = "day" | "week" | "month" | "year";
+type TavilyTopic = "general" | "news" | "finance";
+type TavilySearchDepth = "basic" | "advanced";
+type TavilyTimeRange = "day" | "week" | "month" | "year";
 
 /**
  * Tavily `include_answer` kann laut API-Doku:
@@ -11,15 +11,15 @@ export type TavilyTimeRange = "day" | "week" | "month" | "year";
  * - "basic" (quick answer)
  * - "advanced" (detailed answer)
  */
-export type TavilyIncludeAnswer = boolean | "basic" | "advanced";
+type TavilyIncludeAnswer = boolean | "basic" | "advanced";
 
-export type TavilyRawContentMode = boolean | "markdown" | "text";
+type TavilyRawContentMode = boolean | "markdown" | "text";
 
-export type TavilyImageResult =
+type TavilyImageResult =
   | string
   | { url: string; description?: string };
 
-export type TavilySearchResult = {
+type TavilySearchResult = {
   title: string;
   url: string;
   content: string;
@@ -28,7 +28,7 @@ export type TavilySearchResult = {
   published_date?: string; // kann vorhanden sein, je nach Quelle
 };
 
-export type TavilySearchResponse = {
+type TavilySearchResponse = {
   query: string;
   answer?: string;
   images?: TavilyImageResult[];
@@ -40,7 +40,7 @@ export type TavilySearchResponse = {
   follow_up_questions?: unknown; // Tavily kann sowas liefern (optional)
 };
 
-export type TavilySearchInit = {
+type TavilySearchInit = {
   tavilyApiKey?: string;
   apiBaseUrl?: string; // default https://api.tavily.com
   maxResults?: number; // max_results
@@ -75,7 +75,7 @@ export type TavilySearchInit = {
   timeoutMs?: number;
 };
 
-export type TavilySearchInvoke = {
+type TavilySearchInvoke = {
   query: string;
 
   // diese dürfen typischerweise pro call überschrieben werden:
