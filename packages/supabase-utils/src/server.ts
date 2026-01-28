@@ -191,14 +191,44 @@ export class SupabaseTable<T extends Record<string,any>> {
         return data;
     }
 
-
+    /**
+     * diese Funktion gibt alle Zeilen zurück, die den optionalen Filtern entsprechen, wo die Keys die spaltennamen sind und die Values die Werte der Zeile. Spalten in der tabelle von denen die row (key vom object) auf dessen value zugreifen werden returned
+     * @param values - die Werte die du abfragen möchtest, als Objekt wo der key der Spaltenname ist und der value der Wert
+     * @returns ein Array von Objekten, wo jedes Objekt eine Zeile der Tabelle ist, die den optionalen Filtern entspricht, wo die Keys die spaltennamen sind und die Values die Werte der Zeile
+     */
     public async getRows({...values}:Partial<T>){
         return await this.select({
             columns:["*"],
             where:Object.keys(values).map(key => ({column:key as keyof T,is:(values as any)[key]})),
         })
     }
-    public async getRow({...values}:Partial<T>){
+
+    /**
+     * diese Funktion returned eine unique row von den die spalte die bein param die key des obj ist der value dessen keys entspricht.
+     * WICHTIG: es kann nur eine row returned werden, wenn anhand des params mehr als ein row oder garkeine kommt WIRD EIN ERROR GEWORFEN! (für custom-fail-handling nutze '.saveGetRow()', da wird bei einem faile-case 'null' returned )
+     * IMPORTANT: TIPP: sehe den param als "where"-Filter wie bei der '.select()' function
+     * @param values - die Werte die du abfragen möchtest, als Objekt wo der key der Spaltenname ist und der value der Wert
+     * @returns die unique row
+     */
+    public async getRow({...values}:Partial<T>):Promise<T>{
+        const row = await this.getRows({...values})
+        if(row.length > 1){
+            throw new Error("Multiple rows found for values: " + JSON.stringify(values) + ", returning null")
+        }
+        if(row && row.length === 0){
+            throw new Error("No row found for values: " + JSON.stringify(values) + ", returning null")
+        }
+        return row[0]
+    }
+
+    /**
+     * diese Funktion returned eine unique row von den die spalte die bein param die key des obj ist der value dessen keys entspricht.
+     * WICHTIG: es kann nur eine row returned werden, wenn anhand des params mehr als ein row oder garkeine kommt WIRD NULL RETURNED FÜR CUSTOM-FAIL-HANDLING!
+     * TIPP: sehe den param als "where"-Filter wie bei der '.select()' function
+     * @param values - die Werte die du abfragen möchtest, als Objekt wo der key der Spaltenname ist und der value der Wert
+     * @returns die unique row, oder null wenn keine row gefunden wurde oder mehr als eine row gefunden wurde
+     */
+    public async saveGetRow({...values}:Partial<T>):Promise<T | null>{
         const row = await this.getRows({...values})
         if(row.length > 1){
             logger.error("Multiple rows found for values: " + JSON.stringify(values) + ", returning null")
