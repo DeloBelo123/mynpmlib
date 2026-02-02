@@ -1,10 +1,18 @@
 import { SupabaseTable } from "@delofarag/supabase-utils"
 import { z } from "zod"
 
+export type status = "active" | "canceled" | "past_due" | "trialing"
+
+export interface Product {
+    priceId: string
+    name: string
+    description: string
+}
+
 export interface StripeProps<T extends Record<string,any>> {
     products: Record<string,Product>,
-    secret_key: string,
-    webhook_key: string,
+    secret_key?: string,
+    webhook_key?: string,
     dataTable: SupabaseTable<T>
 }
 
@@ -37,31 +45,24 @@ export interface StripeSubscription {
     status?:status,
     startDate?:string,
     trial_end?:string 
-    selected_plan?:Tier
+    selected_plan?:string
 }
 
 export interface StripeSupabase {
-    user_id:string, // supabase user id
-    user_email:string,
+    id:string, // unique supabase user id von der auth-tabelle, mach sql code das die mit deiner tabelle geknüpft ist
+    email:string,
     stripe_id:string | null,
     stripe_subscription:StripeSubscription
 }
 
-export interface Product {
-    priceId: string
-    name: string
-    description: string
-}
+type webhookFn = (supabaseID:string,priceId:string | null | undefined) => Promise<void>
 
 export interface WebhookConfig {
-    customerSubscriptionCreated?:(supabaseID:string,priceId:string | null | undefined) => Promise<void>,
-    customerSubscriptionUpdated?:(supabaseID:string, priceId:string | null | undefined,status:status | undefined) => Promise<void>,
-    invoicePaymentActionRequired?:(supabaseID:string,priceId:string | null | undefined) => Promise<void>,
-    invoicePaid?:(supabaseID:string,priceId:string | null | undefined) => Promise<void>,
-    invoicePaymentFailed?:(supabaseID:string,priceId:string | null | undefined) => Promise<void>,
-    customerSubscriptionDeleted?:(supabaseID:string,priceId:string | null | undefined) => Promise<void>,
-    checkoutSessionCompleted?:(supabaseID:string,priceId:string | null | undefined) => Promise<void>,
+    "customer.subscription.created"?: webhookFn,
+    "customer.subscription.updated"?: (supabaseID:string, priceId:string | null | undefined,status:status | undefined) => Promise<void>,
+    "customer.subscription.deleted"?: webhookFn,
+    "invoice.payment_action_required"?: webhookFn,
+    "invoice.paid"?: webhookFn,
+    "invoice.payment_failed"?: webhookFn,
+    "checkout.session.completed"?: webhookFn,
 }
-
-export type Tier = "small"| "starter" | "advanced" | "premium" | "small_trial" | "starter_trial" | "advanced_trial" | "premium_trial"
-export type status = "active" | "canceled" | "past_due" | "trialing"

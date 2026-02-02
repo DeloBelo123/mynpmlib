@@ -12,14 +12,15 @@ import {
     type status,
 } from "./stripe_types"
 
-
 export class StripeHandler<T extends StripeSupabase = StripeSupabase> { 
     public products:Record<string,Product>
     public dataTable:SupabaseTable<T>
     private webhook_key:string
     private stripe:Stripe
 
-    constructor({products,secret_key,webhook_key,dataTable}:StripeProps<T>) {
+    constructor({products,secret_key = process.env.STRIPE_SECRET_KEY,webhook_key = process.env.STRIPE_WEBHOOK_KEY,dataTable}:StripeProps<T>) {
+        if(!secret_key) throw new Error("No secret key provided, check your .env file or give in a value")
+        if(!webhook_key) throw new Error("No webhook key provided, check your .env file or give in a value")
         this.products = products
         this.webhook_key = webhook_key
         this.dataTable = dataTable
@@ -29,30 +30,27 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
         })
 
     }
-    public async createCheckoutSession({mode = "subscription",productKey,successUrl,cancelUrl,customerEmail,supabaseId,customerId}:CreateCheckoutSessionProps) {
+    public async createCheckoutSession({mode = "subscription",productKey,successUrl,cancelUrl,supabaseId}:CreateCheckoutSessionProps) {
         try{
             const productPrice = this.products[productKey]?.priceId
-            console.warn("stelle sicher, das du eine user id hast bevor du eine session erstellst")
+
+            const user = await this.dataTable.select({
+                columns: ["email","stripe_id"],
+                where: [{column: "id", is: supabaseId}],
+                first:true
+            })
+
+            if (!user) throw new Error("No user found with the id: " + supabaseId)
+            if (!user.stripe_id) throw new Error("No stripe id found for user with the id: " + supabaseId)
+            if (!user.email) throw new Error("No email found for user with the id: " + supabaseId)
+
             const session = await this.stripe.checkout.sessions.create({
                 client_reference_id: supabaseId,
-                customer_email: customerEmail ?? undefined,
-                customer: customerId ?? undefined,
+                customer_email: user.email ?? undefined,
+                customer: user.stripe_id ?? undefined,
 
                 mode: mode,
-                payment_method_types: [
-                    'card',           // 💳 Kredit-/Debitkarten (Visa, Mastercard, etc.)
-                    'klarna',         // 🛒 Klarna (Buy now, pay later - sehr beliebt in DE)
-                    'sofort',         // 🇩🇪 Sofort (Direktbanking - sehr beliebt in Deutschland)
-                    'sepa_debit',     // 🇪🇺 SEPA Lastschrift (Europa)
-                    'ideal',          // 🇳🇱 iDEAL (Niederlande)
-                    'bancontact',     // 🇧🇪 Bancontact (Belgien)
-                    'eps',            // 🇦🇹 EPS (Österreich)
-                    'giropay',        // 🇩🇪 Giropay (Deutschland)
-                    'apple_pay',      // 🍎 Apple Pay (iOS)
-                    'google_pay',     // 🤖 Google Pay (Android)
-                    'paypal'          // 💰 PayPal (weltweit beliebt)
-                ],
-                line_items: [{price:productPrice,quantity:1}],
+                line_items: [{price: productPrice, quantity: 1}],
                 success_url: successUrl,
                 cancel_url: cancelUrl,
                 locale: 'de',
@@ -65,37 +63,37 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
         }
     }
 
-    public async createCustomer({email,supabaseId}:CreateUserProps): Promise<{ success: boolean, message: string, data: any }> {
+    public async createCustomer({email,supabaseId}:CreateUserProps): Promise<{data:any,message:string}|{error:any}> {
         try{
             //check up ob der customer bereits existiert und wenn ja, freu dich
             const existingCustomer_obj = await this.dataTable.select({
-                columns: ["stripe_id" as keyof T],
-                where: [{column: "user_id" as keyof T, is: supabaseId}],
+                columns: ["stripe_id"],
+                where: [{column: "id", is: supabaseId}],
                 first:true
             })
             if (existingCustomer_obj?.stripe_id) {
                 return {
-                    success: true,
                     message: "Customer already exists",
                     data: existingCustomer_obj.stripe_id
                 }
             }
+
+            //jetzt erstellen wir den customer falls er nicht exestiert
             const customer = await this.stripe.customers.create({
                 email: email,
-                metadata: {supabaseId:supabaseId}
+                metadata: { supabaseId: String(supabaseId) }
             })
             await this.dataTable.update({
-                where:[{column:"user_id", is:supabaseId}],
-                update:{stripe_id:customer.id} as unknown as Partial<T>
+                where:[{column:"id", is:supabaseId}],
+                update:{stripe_id:customer.id} as T
             })
             return {
-                success: true,
                 message: "Customer created successfully",
                 data: customer
             }
         }catch(error){
             console.log("Error creating customer:", error)
-            throw error
+            return { error }
         }
     }
 
@@ -107,7 +105,7 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
 
         let event: Stripe.Event
         try {
-            event = this.stripe.webhooks.constructEvent(body, sig , webhookSecret)
+            event = this.stripe.webhooks.constructEvent(body, sig, webhookSecret)
         } catch (err) {
             console.log(`⚠️  Webhook signature verification failed.`, err)
             return NextResponse.json({
@@ -127,8 +125,8 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
                     const priceId = await this.getPriceID(c1_session.id, 'session')
 
                     if (c1_user_id && priceId) {
-                        if(webhookConfig.checkoutSessionCompleted){
-                            await webhookConfig.checkoutSessionCompleted(c1_user_id, priceId)
+                        if(webhookConfig["checkout.session.completed"]){
+                            await webhookConfig["checkout.session.completed"](c1_user_id, priceId)
                         } else {
                             await this.updateUserAbo(c1_user_id, "active")
                         }
@@ -147,8 +145,8 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
                     const priceId = await this.getPriceID(c5_subscription.id, 'subscription')
 
                     if (supabaseUserId && priceId) {
-                        if(webhookConfig.customerSubscriptionCreated){
-                            await webhookConfig.customerSubscriptionCreated(supabaseUserId, priceId)
+                        if(webhookConfig["customer.subscription.created"]){
+                            await webhookConfig["customer.subscription.created"](supabaseUserId, priceId)
                         } else {
                             await this.updateUserAbo(supabaseUserId, "active")
                         }
@@ -170,8 +168,8 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
                         const status = c6_subscription.status === 'active' ? 'active' : 
                                       c6_subscription.status === 'canceled' ? 'canceled' : 
                                       c6_subscription.status === 'past_due' ? 'past_due' : 'canceled'
-                        if(webhookConfig.customerSubscriptionUpdated){
-                            await webhookConfig.customerSubscriptionUpdated(supabaseUserId, priceId, status)
+                        if(webhookConfig["customer.subscription.updated"]){
+                            await webhookConfig["customer.subscription.updated"](supabaseUserId, priceId, status)
                         } else {
                             await this.updateUserAbo(supabaseUserId, status)
                         }
@@ -190,8 +188,8 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
                     const priceId = await this.getPriceID(c7_invoice.id, 'invoice')
                     // email logik
                     if (supabaseUserId && priceId) {
-                        if(webhookConfig.invoicePaymentActionRequired){
-                            await webhookConfig.invoicePaymentActionRequired(supabaseUserId, priceId)
+                        if(webhookConfig["invoice.payment_action_required"]){
+                            await webhookConfig["invoice.payment_action_required"](supabaseUserId, priceId)
                         } else {
                             await this.updateUserAbo(supabaseUserId, "past_due")
                         }
@@ -210,8 +208,8 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
                     const priceId = await this.getPriceID(c2_invoice.id, 'invoice')
 
                     if (supabaseUserId && priceId) {
-                        if(webhookConfig.invoicePaid){
-                            await webhookConfig.invoicePaid(supabaseUserId, priceId)
+                        if(webhookConfig["invoice.paid"]){
+                            await webhookConfig["invoice.paid"](supabaseUserId, priceId)
                         } else {
                             await this.updateUserAbo(supabaseUserId, "active")
                         }
@@ -230,8 +228,8 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
                     const priceId = await this.getPriceID(c3_invoice.id, 'invoice')
 
                     if (supabaseUserId && priceId) {
-                        if(webhookConfig.invoicePaymentFailed){
-                            await webhookConfig.invoicePaymentFailed(supabaseUserId, priceId)
+                        if(webhookConfig["invoice.payment_failed"]){
+                            await webhookConfig["invoice.payment_failed"](supabaseUserId, priceId)
                         } else {
                             await this.updateUserAbo(supabaseUserId, "past_due")
                         }
@@ -250,8 +248,8 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
                     const priceId = await this.getPriceID(c4_subscription.id, 'subscription')
 
                     if (supabaseUserId && priceId) {
-                        if(webhookConfig.customerSubscriptionDeleted){
-                            await webhookConfig.customerSubscriptionDeleted(supabaseUserId, priceId)
+                        if(webhookConfig["customer.subscription.deleted"]){
+                            await webhookConfig["customer.subscription.deleted"](supabaseUserId, priceId)
                         } else {
                             await this.updateUserAbo(supabaseUserId, "canceled")
                         }
@@ -261,7 +259,7 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
                 }
                 break;
             default:
-                console.log(`Unknown event type: ${event.type}`)
+                console.warn(`Unknown event type: ${event.type}`)
                 break;
             }
         
@@ -276,7 +274,7 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
         try{
             const stripeId_obj = await this.dataTable.select({
                 columns:["stripe_id"],
-                where: [{column: "user_id", is: supabaseId}],
+                where: [{column: "id", is: supabaseId}],
                 first:true
             })
             if (!stripeId_obj) throw new Error("No stripe id found for user")
@@ -294,8 +292,8 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
     async updateUserAbo(userId: string, newStatus: status) {
         try {
             await this.dataTable.update({
-                where: [{column: "user_id", is: userId}],
-                update: {stripe_subscription: {status: newStatus}} as unknown as Partial<T>
+                where: [{column: "id", is: userId}],
+                update: {stripe_subscription: {status: newStatus}} as T
             })
             console.log(`✅ User ${userId} subscription status updated to: ${newStatus}`)
         } catch (error) {
@@ -307,7 +305,7 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
     private async getSupabaseUserIdByStripeCustomerId(stripeCustomerId: string): Promise<string | null> {
         try {
             const users = await this.dataTable.select({
-                columns: ["user_id" as keyof T],
+                columns: ["id" as keyof T],
                 where: [{column: "stripe_id" as keyof T, is: stripeCustomerId}]
             })
             if (users && users.length > 0) {
