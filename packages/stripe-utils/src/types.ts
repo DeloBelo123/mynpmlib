@@ -1,5 +1,4 @@
-import { SupabaseClient, SupabaseTable } from "@delofarag/supabase-utils"
-import { z } from "zod"
+import { SupabaseTable, ServerRequestLike } from "@delofarag/supabase-utils/src/server"
 
 export type status = "active" | "canceled" | "past_due" | "trialing"
 
@@ -14,32 +13,21 @@ export interface StripeProps<T extends Record<string,any>> {
     secret_key?: string,
     webhook_key?: string,
     dataTable: SupabaseTable<T>,
-    serverSupabase?: SupabaseClient
+    webhookEventTable?: SupabaseTable<{event_id:string}>, //Optional: Tabelle mit Spalte event_id (UNIQUE). Wenn gesetzt, wird jedes Event nur einmal verarbeitet (Idempotenz). 
 }
 
-export const CreateCheckoutSessionSchema = z.object({
-    mode: z.enum(["subscription", "payment", "setup"]).default("subscription"),
-    successUrl: z.string().url(),
-    cancelUrl: z.string().url(),
-    customerEmail: z.string().email().optional(),
-    supabaseId: z.string(), // ich so weil ich die sb-session dahin schicke mit der handleSession func
-    customerId: z.string().optional(),
-    productKey: z.string(),
-})
-
-export const CreateUserSchema = z.object({
-    email: z.string().email(),
-    supabaseId: z.string()
-})
-
-export const CreateBillingPortalSchema = z.object({
-    supabaseId: z.string(),
-    returnUrl: z.string().url()
-})
-
-export type CreateCheckoutSessionProps = z.infer<typeof CreateCheckoutSessionSchema>
-export type CreateUserProps = z.infer<typeof CreateUserSchema>
-export type CreateBillingPortalProps = z.infer<typeof CreateBillingPortalSchema>
+export type CreateCheckoutSessionProps = {
+    mode?: "subscription" | "payment" | "setup",
+    productQuantity?: number,
+    productKey: string,
+    successUrl: string,
+    cancelUrl: string,
+    req: ServerRequestLike
+}
+export type CreateBillingPortalProps = {
+    returnUrl: string,
+    req: ServerRequestLike
+}
 
 export interface StripeSubscription {
     priceId?:string,

@@ -17,6 +17,7 @@ if(!process.env.NEXT_PUBLIC_SUPABASE_URL) {
 async function main() {
     const table = new SupabaseTable<TestTable>("testos")
     const row = await table.getRow({name:"Delo"})
+    console.log(row.name)
 
 }
 

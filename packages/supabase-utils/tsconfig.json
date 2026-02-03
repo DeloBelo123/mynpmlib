@@ -4,7 +4,7 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/client", "src/server"],
   "exclude": ["node_modules", "dist"]
 }
 

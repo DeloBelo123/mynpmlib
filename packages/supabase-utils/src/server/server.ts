@@ -1,20 +1,7 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
 import { logger } from "@delofarag/base-utils"
 import { UUID } from "crypto";
-
-export type SupabaseServerConfig = {
-    url: string
-    serviceRoleKey: string
-}
-
-export function createSupabaseServerClient(config: SupabaseServerConfig): SupabaseClient {
-    return createClient(config.url, config.serviceRoleKey)
-}
-
-// Type für verschachtelte Updates mit Type Safety
-type NestedUpdate<T> = {
-  [K in keyof T]?: T[K] extends object ? T[K] | { [P in keyof T[K]]?: T[K][P] } : T[K]
-}; 
 
 export class SupabaseTable<T extends Record<string,any>> {
     public tableName:string
@@ -27,7 +14,7 @@ export class SupabaseTable<T extends Record<string,any>> {
     }
     /**
      * @param rows - die neuen Zeilen die du in die Tabelle einfügen möchtest, als Array von Objekten, wo jedes Objekt eine Zeile ist
-     * @returns nichst, fügt eifach die neuen Zeilen in die Tabelle ein
+     * @returns die inserted data
      */
     async insert(rows:Array<Partial<T>>){
         const { data:insertedData, error } = await this.supabase
@@ -38,14 +25,16 @@ export class SupabaseTable<T extends Record<string,any>> {
         }
         return insertedData;
     }
+
+    // funcitonal overloading
     /**
      * @param columns - die spalten die du abfragen möchtest, standardmäßig ist es "*", also alle spalten,
      * @param where - die filter die du anwenden möchtest was ausgewählt werden soll, standardmäßig ist es ein leeres Array, also keine Filter
      * @param ordered_by - sortierung nach einer spalte (column: spaltenname, descending: true/false)
      * @param limited_to - begrenzt die anzahl der ergebnisse
+     * @param first - gibt nur die erste Zeile zurück wenn auf true gesetzt ist, als object, anstatt eines Arrays von Zeilen (standardmäßig ist es false)
      * @returns returned ein array von Objekte, wo jedes Objekt eine Zeile der Tabelle ist, die den optionalen Filtern entspricht, wo die Keys die spaltennamen sind und die Values die Werte der Zeile
      */
-    // funcitonal overloading
     async select({columns , where, ordered_by, limited_to}:{
         columns:Array<keyof T | "*">, 
         where?:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | UUID | undefined}>,
@@ -97,33 +86,13 @@ export class SupabaseTable<T extends Record<string,any>> {
         }
         return data
     }
-    /**
-     * Flatten-Funktion für verschachtelte Objekte (Dot-Notation)
-     */
-    private flattenNested(obj: Record<string, any>, prefix = ""): Record<string, any> {
-        const res: Record<string, any> = {};
-        
-        for (const key in obj) {
-            const val = obj[key];
-            const newKey = prefix ? `${prefix}.${key}` : key;
-            
-            if (val && typeof val === "object" && !Array.isArray(val)) {
-                // Rekursiv verschachtelte Objekte flach machen
-                Object.assign(res, this.flattenNested(val, newKey));
-            } else {
-                res[newKey] = val;
-            }
-        }
-
-        return res;
-    }
 
     /**
      * @param updated - die spalten die du aktualisieren möchtest, als Objekt wo der key der Spaltenname ist und der value der neue Wert
      * @param where - die Filter die genau sagen welche Zeile sich aktualisieren soll, sonst wird jede Zeile aktualisiert!!!
      * @returns die geupdateten Zeilen, also die Zeilen die du aktualisiert hast
      */
-    async update({where,update}:{ where:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | UUID | undefined}>, update:NestedUpdate<T> }){
+    async update({where,update}:{ where:Array<{column:keyof T | (string & {}),is:any}>, update:NestedUpdate<T> }){
         // 1. Objekt flach machen (Dot-Notation für JSON-Properties)
         const flatUpdate = this.flattenNested(update as Record<string, any>);
         
@@ -240,6 +209,27 @@ export class SupabaseTable<T extends Record<string,any>> {
         }
         return row[0]
     }
+
+     /**
+     * Flatten-Funktion für verschachtelte Objekte (Dot-Notation)
+     */
+     private flattenNested(obj: Record<string, any>, prefix = ""): Record<string, any> {
+        const res: Record<string, any> = {};
+        
+        for (const key in obj) {
+            const val = obj[key];
+            const newKey = prefix ? `${prefix}.${key}` : key;
+            
+            if (val && typeof val === "object" && !Array.isArray(val)) {
+                // Rekursiv verschachtelte Objekte flach machen
+                Object.assign(res, this.flattenNested(val, newKey));
+            } else {
+                res[newKey] = val;
+            }
+        }
+
+        return res;
+    }
 }
 
 export function selectTable({tableName,possibleTables}:{tableName:string,possibleTables:Array<SupabaseTable<Record<string,any>>>}){
@@ -250,7 +240,55 @@ export function selectTable({tableName,possibleTables}:{tableName:string,possibl
     return table
 }
 
+/** update: Objekt mit Spaltennamen als Keys, neue Werte als Values. Bei JSON-Spalten: ganzes Objekt ODER nur geänderte Felder. */
+type NestedUpdate<T> = {
+    [K in keyof T]?: T[K] extends object ? T[K] | { [P in keyof T[K]]?: T[K][P] } : T[K]
+  }; 
 
+// das hier ist motto ein type für alle Request-Objekte die das hier haben müssen, ts typed strukturell (motto "HAT typ x alles von typ y" anstatt "IST typ x = typ y")
+export interface ServerRequestLike {
+    cookies: {
+      getAll(): { name: string; value: string }[]
+      setAll(cookies: { name: string; value: string; options?: any }[]): void
+    }
+}
+  
+export function createServerSupabase(req: ServerRequestLike): SupabaseClient {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        throw new Error("NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY is not set, but needed for server-side supabase client!")
+    }
+    return createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return req.cookies.getAll()
+          },
+          setAll(cookies) {
+            req.cookies.setAll(cookies)
+          },
+        },
+      }
+    )
+}
+
+export async function getUser({req}:{req: ServerRequestLike}){
+    const supabase = createServerSupabase(req)
+    const { data: { user }, error } = await supabase.auth.getUser()
+    if (error) throw new Error(`Error getting user: ${error.message}`)
+    if (!user) throw new Error("No user found")
+    return user
+}
+
+export async function getSession({req}:{req: ServerRequestLike}){
+    const supabase = createServerSupabase(req)
+    const { data: { session }, error } = await supabase.auth.getSession()
+    if (error) throw new Error(`Error getting session: ${error.message}`)
+    if (!session) throw new Error("No session found")
+    return session
+}
+  
 
 
 

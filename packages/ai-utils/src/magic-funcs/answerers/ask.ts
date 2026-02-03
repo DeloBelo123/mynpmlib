@@ -4,9 +4,7 @@ import { BaseChatModel, ChatPromptTemplate, StringOutputParser } from "../../imp
 export async function ask(input:string | {llm:BaseChatModel, question:string}){
     const llm = typeof input === "string" ? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}) : input.llm
     const prompt = ChatPromptTemplate.fromMessages([
-      ["system", `
-        Du bist ein hilfreicher Assistent.
-        `],
+      ["system", `Du bist ein hilfreicher Assistent.`],
       ["human", "{input}"]
     ])
     const chain = createSimpleChain(prompt, llm, new StringOutputParser())
