@@ -1,4 +1,4 @@
-import { SupabaseTable } from "@delofarag/supabase-utils"
+import { SupabaseClient, SupabaseTable } from "@delofarag/supabase-utils"
 import { z } from "zod"
 
 export type status = "active" | "canceled" | "past_due" | "trialing"
@@ -13,7 +13,8 @@ export interface StripeProps<T extends Record<string,any>> {
     products: Record<string,Product>,
     secret_key?: string,
     webhook_key?: string,
-    dataTable: SupabaseTable<T>
+    dataTable: SupabaseTable<T>,
+    serverSupabase?: SupabaseClient
 }
 
 export const CreateCheckoutSessionSchema = z.object({

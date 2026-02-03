@@ -1,6 +1,7 @@
 import Stripe from "stripe"
 import { SupabaseTable } from "@delofarag/supabase-utils"
 import { NextRequest, NextResponse } from "next/server"
+import { createClient, SupabaseClient } from "@supabase/supabase-js"
 import {
     type CreateCheckoutSessionProps, 
     type CreateBillingPortalProps,
@@ -17,13 +18,21 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
     public dataTable:SupabaseTable<T>
     private webhook_key:string
     private stripe:Stripe
+    private serverSupabase: SupabaseClient
 
-    constructor({products,secret_key = process.env.STRIPE_SECRET_KEY,webhook_key = process.env.STRIPE_WEBHOOK_KEY,dataTable}:StripeProps<T>) {
+    constructor({
+        products,
+        dataTable,
+        secret_key = process.env.STRIPE_SECRET_KEY,
+        webhook_key = process.env.STRIPE_WEBHOOK_KEY,
+        serverSupabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+    }:StripeProps<T>) {
         if(!secret_key) throw new Error("No secret key provided, check your .env file or give in a value")
         if(!webhook_key) throw new Error("No webhook key provided, check your .env file or give in a value")
         this.products = products
         this.webhook_key = webhook_key
         this.dataTable = dataTable
+        this.serverSupabase = serverSupabase
         this.stripe = new Stripe(secret_key,{
             apiVersion: "2023-10-16",
             typescript: true
@@ -31,7 +40,7 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
 
     }
     public async createCheckoutSession({mode = "subscription",productKey,successUrl,cancelUrl,supabaseId}:CreateCheckoutSessionProps) {
-        try{
+        try{        
             const productPrice = this.products[productKey]?.priceId
 
             const user = await this.dataTable.select({
@@ -121,14 +130,14 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
                 try {
                     console.log("Checkout session completed")
                     const c1_session = event.data.object as Stripe.Checkout.Session
-                    const c1_user_id = c1_session.client_reference_id
+                    const c1_id = c1_session.client_reference_id
                     const priceId = await this.getPriceID(c1_session.id, 'session')
 
-                    if (c1_user_id && priceId) {
+                    if (c1_id && priceId) {
                         if(webhookConfig["checkout.session.completed"]){
-                            await webhookConfig["checkout.session.completed"](c1_user_id, priceId)
+                            await webhookConfig["checkout.session.completed"](c1_id, priceId)
                         } else {
-                            await this.updateUserAbo(c1_user_id, "active")
+                            await this.updateUserAbo(c1_id, "active")
                         }
                     }
                 } catch (error) {
@@ -309,7 +318,7 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
                 where: [{column: "stripe_id" as keyof T, is: stripeCustomerId}]
             })
             if (users && users.length > 0) {
-                return (users[0] as any).user_id as string
+                return (users[0] as any).id as string
             }
             console.warn(`⚠️ No Supabase user found for Stripe customer ID: ${stripeCustomerId}`)
             return null

@@ -17,17 +17,13 @@ export async function handleSession({
     stripePublicKey = process.env.NEXT_PUBLIC_STRIPE_PUBLIC_KEY!, 
     supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!),
     backend, 
-    productKey, 
-    successUrl, 
-    cancelUrl, 
+    productKey,  
     mode = "subscription"
 }: {
     stripePublicKey?: string,
     supabase?: SupabaseClient,
     backend: string,
     productKey: string,
-    successUrl: string,
-    cancelUrl: string,
     mode?: "subscription" | "payment" | "setup"
 }):Promise<void> {
     try{
@@ -38,13 +34,11 @@ export async function handleSession({
         if(supabaseError) throw new Error("Error beim user kriegen in der 'handleSession' function, Error: " + supabaseError)
 
         if(!user) throw new Error("No user found")
-            
+
         const SupabaseUserId = user?.id
         const respo = await axios.post(backend,{
             mode,
             productKey,
-            successUrl,
-            cancelUrl,
             supabaseId: SupabaseUserId,
         })
         const sessionId = respo.data.id
@@ -77,14 +71,34 @@ export async function handleBillingPortal({supabase, backend,returnUrl}:{supabas
 }
 
 /**
+ * diese function redirectet den user zu einem von dir im Stripe Dashboard erstellten Payment Link.
+ * @param link der Payment Link, den du im Stripe Dashboard erstellt hast
+ * @returns nichts, es redirectet den user zu dem Payment Link
+ */
+export async function sendToPaymentLink(link:string){
+    window.location.href = link
+}
+
+/**
  * diese function macht den user zu einem stripe-kunden wenn er noch keiner ist
  * backend-partner: sh.createCustomer()
- * @param supabase - der Supabase Client
+ * 
+ * @param supabase - der Supabase Client, standardmäßig ist es der client mit den .env variablen
  * @param table die supabase table wo die stripe-id zum dazugehörigen user gespeichert wird
  * @param backend das backend wohin die user-data geschickt wird um ihn zu einem stripe-kunden zu machen: nutze die createCustomer() methode vom stripe-handler
  * @returns None
+ * 
+ * @deprecated DANGEROUS! It sends the supabase-id to the backend which gets evaluated and seen as source of truth, hacker can attack it
  */
-export async function addStripeID<T extends StripeSupabase>({supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!) , table, backend}:{supabase?: SupabaseClient, table:SupabaseTable<T>,backend:string}){
+export async function addStripeID<T extends StripeSupabase>({
+    supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!),
+    table, 
+    backend
+}:{
+    supabase?: SupabaseClient,
+    table:SupabaseTable<T>,
+    backend:string
+}){
     try{
         if(!supabase) throw new Error("No supabase client provided, check your .env file (NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY) or give in a instance yourself")
             const { data:{ user }, error:getUserError } = await supabase.auth.getUser()
@@ -95,7 +109,7 @@ export async function addStripeID<T extends StripeSupabase>({supabase = createCl
             
             const stripeID_obj = await table.select({
                 columns:["stripe_id" as keyof T],
-                where:[{column:"user_id" as keyof T, is:SupabaseUserId}],
+                where:[{column:"id" as keyof T, is:SupabaseUserId}],
                 first:true
             })
             if(stripeID_obj?.stripe_id){
@@ -105,7 +119,7 @@ export async function addStripeID<T extends StripeSupabase>({supabase = createCl
             //So, wenn der code weiter läuft dann ist der user kein stripe-kunde, das fixxen wir jetzt
             const email_obj = await table.select({
                 columns:["email"],
-                where:[{column:"user_id", is: SupabaseUserId}],
+                where:[{column:"id", is: SupabaseUserId}],
                 first:true
             })
             if(!email_obj) throw new Error("user mit der id: " + SupabaseUserId + " hat keine Mail!")
@@ -121,7 +135,7 @@ export async function addStripeID<T extends StripeSupabase>({supabase = createCl
                 throw new Error("Error beim erstellen der stripeID, Error: " + respo.data.message)
             }
             return respo.data.data
-    }catch(error){
+    } catch(error){
         console.error("Error adding stripe ID:", error)
         throw error
     }
