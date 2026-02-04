@@ -43,7 +43,8 @@ export async function sendSession<T>({supabase = createClient(process.env.NEXT_P
                     email:data.session?.user.email
                 },
                 ...(extraData !== undefined && { extraData })
-            }
+            },
+            { withCredentials: true }
         )
         return { data:backendData,status,session:data.session }
     }catch(e) {

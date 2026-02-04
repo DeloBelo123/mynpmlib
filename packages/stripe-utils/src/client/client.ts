@@ -32,7 +32,7 @@ export async function handleCheckoutSession({
             mode,
             productKey,
             productQuantity,
-        })
+        }, { withCredentials: true })
         const sessionId = respo.data.id
         const { error } = await stripe.redirectToCheckout({ sessionId })
         if (error) throw new Error("Error redirecting to checkout: " + error)
@@ -49,7 +49,7 @@ export async function handleCheckoutSession({
  * @returns nichst, es bringt dich zur billing-portal-url oder returned undefined
  */
 export async function handleBillingPortal({backend}:{backend:string}){
-    const respo = await axios.post(backend,{})
+    const respo = await axios.post(backend,{}, { withCredentials: true })
     if(!respo.data) return
     window.location.href = respo.data.url
 }
