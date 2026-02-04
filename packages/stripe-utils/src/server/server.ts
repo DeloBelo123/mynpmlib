@@ -5,13 +5,13 @@ import { NextRequest, NextResponse } from "next/server"
 import {
     type CreateCheckoutSessionProps, 
     type CreateBillingPortalProps,
-    type StripeSupabase,
+    type StripeTable,
     type WebhookConfig,
     type StripeProps,
     type Product,
 } from "../types"
 
-export class StripeHandler<T extends StripeSupabase = StripeSupabase> { 
+export class StripeHandler<T extends StripeTable = StripeTable> { 
     public products:Record<string,Product>
     public dataTable:SupabaseTable<T>
     private webhook_key:string
@@ -137,7 +137,7 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
     }
 
     /**
-     * diese function handelt die webhooks von stripe. WICHTIG: handle hier auch die verschiedenen props von 'StripeSupabase' guck in die types.ts file
+     * diese function handelt die webhooks von stripe. WICHTIG: handle hier auch die verschiedenen props von 'StripeTable' guck in die types.ts file
      * @param req die request, die die webhook erstellt (http req vom front-end welches cookies enthält)
      * @param webhookConfig die webhook config, die die webhooks handelt
      * @return eine next response mit dem success status und einer message
@@ -405,11 +405,11 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
 
 export const sh = createStripeHandler({
     products: products,
-    dataTable: new SupabaseTable<StripeSupabase>("stripe_supabase"),
+    dataTable: new SupabaseTable<StripeTable>("stripe_supabase"),
     webhookEventTable: new SupabaseTable<{ event_id: string }>("stripe_webhook_events")
 })
  */
-export function createStripeHandler<T extends StripeSupabase>(config: Omit<StripeProps<T>, 'dataTable'> & { dataTable: SupabaseTable<T> }): StripeHandler<T> {
+export function createStripeHandler<T extends StripeTable>(config: Omit<StripeProps<T>, 'dataTable'> & { dataTable: SupabaseTable<T> }): StripeHandler<T> {
     return new StripeHandler(config)
 }
 

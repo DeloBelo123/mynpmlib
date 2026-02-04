@@ -38,7 +38,7 @@ export interface StripeSubscription {
     selected_plan?:string
 }
 
-export interface StripeSupabase {
+export interface StripeTable {
     id:string, // unique supabase user id von der auth-tabelle, mach sql code das die mit deiner tabelle geknüpft ist
     email:string,
     stripe_id:string | null,
