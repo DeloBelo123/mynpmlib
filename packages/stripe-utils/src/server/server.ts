@@ -1,6 +1,6 @@
 import Stripe from "stripe"
 import { SupabaseTable } from "@delofarag/supabase-utils"
-import { getUser, ServerRequestLike } from "@delofarag/supabase-utils/src/server"
+import { getUser, ServerRequestLike } from "@delofarag/supabase-utils/server"
 import { NextRequest, NextResponse } from "next/server"
 import {
     type CreateCheckoutSessionProps, 
@@ -11,57 +11,6 @@ import {
     type Product,
 } from "../types"
 
-
-/**
- * @example CONSTRUCTOR:
- *  public products:Record<string,Product>
-    public dataTable:SupabaseTable<T>
-    private webhook_key:string
-    private webhookEventTable?: SupabaseTable<{ event_id: string }>
-    private stripe:Stripe
-
-    constructor({
-        products,
-        dataTable,
-        webhookEventTable,
-        secret_key = process.env.STRIPE_SECRET_KEY,
-        webhook_key = process.env.STRIPE_WEBHOOK_KEY,
-    }:StripeProps<T>) {
-        if(!secret_key) throw new Error("No secret key provided, check your .env file or give in a value")
-        if(!webhook_key) throw new Error("No webhook key provided, check your .env file or give in a value")
-        this.products = products
-        this.webhook_key = webhook_key
-        this.dataTable = dataTable
-        this.webhookEventTable = webhookEventTable
-        this.stripe = new Stripe(secret_key,{
-            apiVersion: "2023-10-16",
-            typescript: true
-        })
-    // an usecase as an example how to initialize the stripe handler:
- * @example export const products = {
-    starter: {
-        priceId: "price_1234567890",
-        name: "Starter",
-        description: "Basic plan"
-    },
-    pro: {
-        priceId: "price_1234567890",
-        name: "Pro",
-        description: "Pro plan"
-    },
-    enterprise: {
-        priceId: "price_1234567890",
-        name: "Enterprise",
-        description: "Enterprise plan"
-    }
-}
-
-export const sh = createStripeHandler({
-    products: products,
-    dataTable: new SupabaseTable<StripeSupabase>("stripe_supabase"),
-    webhookEventTable: new SupabaseTable<{ event_id: string }>("stripe_webhook_events")
-})
- */
 export class StripeHandler<T extends StripeSupabase = StripeSupabase> { 
     public products:Record<string,Product>
     public dataTable:SupabaseTable<T>
@@ -409,7 +358,57 @@ export class StripeHandler<T extends StripeSupabase = StripeSupabase> {
     }
 }
 
-/**Factory-Funktion die den Type automatisch aus der SupabaseTable ableitet */
+/**
+ * erstellt einen StripeHandler:
+ * @example CONSTRUCTOR:
+ *  public products:Record<string,Product>
+    public dataTable:SupabaseTable<T>
+    private webhook_key:string
+    private webhookEventTable?: SupabaseTable<{ event_id: string }>
+    private stripe:Stripe
+
+    constructor({
+        products,
+        dataTable,
+        webhookEventTable,
+        secret_key = process.env.STRIPE_SECRET_KEY,
+        webhook_key = process.env.STRIPE_WEBHOOK_KEY,
+    }:StripeProps<T>) {
+        if(!secret_key) throw new Error("No secret key provided, check your .env file or give in a value")
+        if(!webhook_key) throw new Error("No webhook key provided, check your .env file or give in a value")
+        this.products = products
+        this.webhook_key = webhook_key
+        this.dataTable = dataTable
+        this.webhookEventTable = webhookEventTable
+        this.stripe = new Stripe(secret_key,{
+            apiVersion: "2023-10-16",
+            typescript: true
+        })
+    // an usecase as an example how to initialize the stripe handler:
+ * @example export const products = {
+    starter: {
+        priceId: "price_1234567890",
+        name: "Starter",
+        description: "Basic plan"
+    },
+    pro: {
+        priceId: "price_1234567890",
+        name: "Pro",
+        description: "Pro plan"
+    },
+    enterprise: {
+        priceId: "price_1234567890",
+        name: "Enterprise",
+        description: "Enterprise plan"
+    }
+}
+
+export const sh = createStripeHandler({
+    products: products,
+    dataTable: new SupabaseTable<StripeSupabase>("stripe_supabase"),
+    webhookEventTable: new SupabaseTable<{ event_id: string }>("stripe_webhook_events")
+})
+ */
 export function createStripeHandler<T extends StripeSupabase>(config: Omit<StripeProps<T>, 'dataTable'> & { dataTable: SupabaseTable<T> }): StripeHandler<T> {
     return new StripeHandler(config)
 }

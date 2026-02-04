@@ -14,11 +14,11 @@ export function createSupabaseClient(config: SupabaseClientConfig): SupabaseClie
  * sendet die relevantesten daten der session an ein backend. 
  * die daten sind: provider-token, refresh-token, userobjekt mit id und email (den erst nicht, nur diese 2 sind die wichtigsten)
  * WICHTIG: das ist eine async function, du muss sie awaiten!
- * @param supabase - der Supabase Client
+ * @param supabase - der Supabase Client, per default mit NEXT_PUBLIC_SUPABASE_URL und NEXT_PUBLIC_SUPABASE_ANON_KEY in den .env files erstellt
  * @param toBackend = das ist die backend url an der du deine session schicken willst
  * @returns backend-response
  */
-export async function sendSession<T>({supabase, toBackend,extraData}:{supabase: SupabaseClient,toBackend:string, extraData?:any}){
+export async function sendSession<T>({supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!), toBackend,extraData}:{supabase?: SupabaseClient,toBackend:string, extraData?:any}){
     const { data, error:sessionError } = await supabase.auth.getSession()
     console.log(`google_access_token:${data.session?.provider_token}`)
     console.log(`google_refresh_token:${data.session?.provider_refresh_token}`)

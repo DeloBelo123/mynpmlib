@@ -9,6 +9,12 @@ export interface ServerRequestLike {
     }
 }
   
+/**
+ * erstellt einen supabase client für den server
+ * .env = NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
+ * @param req das request objekt
+ * @returns den supabase client
+ */
 export function createServerSupabase(req: ServerRequestLike): SupabaseClient {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
         throw new Error("NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY is not set, but needed for server-side supabase client!")

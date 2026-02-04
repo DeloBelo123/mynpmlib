@@ -47,39 +47,9 @@ const session = await stripeHandler.createCheckoutSession({
   productKey: "starter",
   successUrl: "https://example.com/success",
   cancelUrl: "https://example.com/cancel",
-  supabaseId: "user-id"
 })
 ```
 
-### Client-side
-
-```typescript
-import { handleSession, handleBillingPortal } from "@my/stripe-utils"
-import { createSupabaseClient } from "@my/supabase-utils"
-
-const supabase = createSupabaseClient({
-  url: "https://your-project.supabase.co",
-  anonKey: "your-anon-key"
-})
-
-// Redirect to checkout
-await handleSession({
-  stripePublicKey: "pk_test_...",
-  supabase,
-  backend: "/api/checkout",
-  productKey: "starter",
-  successUrl: "https://example.com/success",
-  cancelUrl: "https://example.com/cancel"
-})
-```
-
-## Exports
-
-- `StripeHandler` - Main Stripe handler class
-- `createStripeHandler()` - Factory function
-- `handleSession()` - Client-side checkout handler
-- `handleBillingPortal()` - Billing portal handler
-- `addStripeID()` - Add Stripe customer ID
 
 
 
