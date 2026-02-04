@@ -1,6 +1,6 @@
 import Stripe from "stripe"
 import { SupabaseTable } from "@delofarag/supabase-utils"
-import { getUser, ServerRequestLike } from "@delofarag/supabase-utils/server"
+import { getUser } from "@delofarag/supabase-utils/server"
 import { NextRequest, NextResponse } from "next/server"
 import {
     type CreateCheckoutSessionProps, 
@@ -86,7 +86,7 @@ export class StripeHandler<T extends StripeTable = StripeTable> {
      * @param req die request, die die customer erstellt (http req vom front-end welches cookies enthält)
      * @return den user (die row in der tablle)
      */
-    public async createCustomer({req}:{req:ServerRequestLike}):Promise<T>{
+    public async createCustomer({ req }: { req: NextRequest }): Promise<T> {
         try{
             const userInSession = await getUser({req})
 

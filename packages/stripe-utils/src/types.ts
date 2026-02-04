@@ -1,13 +1,31 @@
-import { ServerRequestLike } from "@delofarag/supabase-utils/server"
+import type { NextRequest } from "next/server"
 import { SupabaseTable } from "@delofarag/supabase-utils"
+import { z } from "zod"
 
-export type status = "active" | "canceled" | "past_due" | "trialing"
-
+// Product Types
 export interface Product {
     priceId: string
     description: string
     name:string
 }
+
+export type Products = Record<string, Product>
+
+//schemas for backend
+export const checkoutSchema = z.object({
+    mode: z.enum(["subscription", "payment", "setup"]).optional(),
+    productQuantity: z.number().optional().default(1),
+    productKey: z.string(),
+    successUrl: z.string(),
+    cancelUrl: z.string()
+})
+
+export const billingPortalSchema = z.object({
+    returnUrl: z.string()
+})
+
+// class Types
+export type status = "active" | "canceled" | "past_due" | "trialing"
 
 export interface StripeProps<T extends Record<string,any>> {
     products: Record<string,Product>,
@@ -23,11 +41,12 @@ export type CreateCheckoutSessionProps = {
     productKey: string,
     successUrl: string,
     cancelUrl: string,
-    req: ServerRequestLike
+    req: NextRequest
 }
+
 export type CreateBillingPortalProps = {
     returnUrl: string,
-    req: ServerRequestLike
+    req: NextRequest
 }
 
 export interface StripeSubscription {
@@ -45,6 +64,7 @@ export interface StripeTable {
     stripe_subscriptions:StripeSubscription[]
 }
 
+// webhook Types
 type webhookFn = (supabaseID:string,priceId:string | null | undefined) => Promise<void>
 
 export interface WebhookConfig {
@@ -55,4 +75,8 @@ export interface WebhookConfig {
     "invoice.paid"?: webhookFn,
     "invoice.payment_failed"?: webhookFn,
     "checkout.session.completed"?: webhookFn,
+}
+
+export interface WebhookEventTable {
+    event_id:string
 }

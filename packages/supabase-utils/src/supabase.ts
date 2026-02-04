@@ -2,6 +2,17 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "@delofarag/base-utils"
 import { UUID } from "crypto";
 
+/**
+ * @example CONSTRUCTOR:
+ * public tableName:string
+    public structure?:T
+    private supabase: SupabaseClient
+    
+    constructor(tableName:string, supabase?: SupabaseClient){
+        this.tableName = tableName
+        this.supabase = supabase ?? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY! || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+    }
+ */
 export class SupabaseTable<T extends Record<string,any>> {
     public tableName:string
     public structure?:T
@@ -9,7 +20,7 @@ export class SupabaseTable<T extends Record<string,any>> {
     
     constructor(tableName:string, supabase?: SupabaseClient){
         this.tableName = tableName
-        this.supabase = supabase ?? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+        this.supabase = supabase ?? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY! || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
     }
     /**
      * @param rows - die neuen Zeilen die du in die Tabelle einfügen möchtest, als Array von Objekten, wo jedes Objekt eine Zeile ist
@@ -242,4 +253,4 @@ export function selectTable({tableName,possibleTables}:{tableName:string,possibl
 /** update: Objekt mit Spaltennamen als Keys, neue Werte als Values. Bei JSON-Spalten: ganzes Objekt ODER nur geänderte Felder. */
 type NestedUpdate<T> = {
     [K in keyof T]?: T[K] extends object ? T[K] | { [P in keyof T[K]]?: T[K][P] } : T[K]
-  }; 
+}; 

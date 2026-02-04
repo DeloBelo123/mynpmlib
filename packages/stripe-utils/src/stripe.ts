@@ -1,26 +1,5 @@
 import { Product } from "./types"
 
-const test:Record<string,Product> = {
-    starter:{
-        description:"starter-pack ist billig",
-        priceId:"price_1234567890",
-        name:"starter-pack",
-    },
-    pro:{
-        description:"pro-pack ist mittel",
-        priceId:"price_1234567891",
-        name:"pro-pack",
-    },
-    enterprise:{
-        description:"enterprise-pack ist teuer",
-        priceId:"price_1234567892",
-        name:"enterprise-pack",
-    },
-
-}
-
-console.log(getProduct(test,"starter-pack ist billig"))
-
 function getProductByName(products:Record<string,Product>,name:string):Product | undefined{
     for(const product in products){
         if(products[product].name == name){

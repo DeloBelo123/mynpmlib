@@ -1,6 +1,6 @@
 {
   "name": "@delofarag/supabase-utils",
-  "version": "1.2.3",
+  "version": "1.2.10",
   "type": "module",
   "files": ["dist"],
 
@@ -29,6 +29,9 @@
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.39.0",
     "axios": "^1.6.0"
+  },
+  "peerDependencies": {
+    "next": ">=14"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
