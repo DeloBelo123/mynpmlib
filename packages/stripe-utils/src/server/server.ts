@@ -1,5 +1,6 @@
 import Stripe from "stripe"
-import { SupabaseTable, getUser, ServerRequestLike } from "@delofarag/supabase-utils/src/server"
+import { SupabaseTable } from "@delofarag/supabase-utils"
+import { getUser, ServerRequestLike } from "@delofarag/supabase-utils/src/server"
 import { NextRequest, NextResponse } from "next/server"
 import {
     type CreateCheckoutSessionProps, 
@@ -8,7 +9,6 @@ import {
     type WebhookConfig,
     type StripeProps,
     type Product,
-    type status,
 } from "../types"
 
 

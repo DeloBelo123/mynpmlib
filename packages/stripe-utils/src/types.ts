@@ -1,11 +1,12 @@
-import { SupabaseTable, ServerRequestLike } from "@delofarag/supabase-utils/src/server"
+import { ServerRequestLike } from "@delofarag/supabase-utils/src/server"
+import { SupabaseTable } from "@delofarag/supabase-utils"
 
 export type status = "active" | "canceled" | "past_due" | "trialing"
 
 export interface Product {
     priceId: string
-    name: string
     description: string
+    name:string
 }
 
 export interface StripeProps<T extends Record<string,any>> {
