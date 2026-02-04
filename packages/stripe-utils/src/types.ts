@@ -42,7 +42,7 @@ export interface StripeSupabase {
     id:string, // unique supabase user id von der auth-tabelle, mach sql code das die mit deiner tabelle geknüpft ist
     email:string,
     stripe_id:string | null,
-    stripe_subscription:StripeSubscription
+    stripe_subscriptions:StripeSubscription[]
 }
 
 type webhookFn = (supabaseID:string,priceId:string | null | undefined) => Promise<void>
