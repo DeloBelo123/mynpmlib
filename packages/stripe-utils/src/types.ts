@@ -13,11 +13,9 @@ export type Products = Record<string, Product>
 
 //schemas for backend
 export const checkoutSchema = z.object({
-    mode: z.enum(["subscription", "payment", "setup"]).optional(),
+    mode: z.enum(["subscription", "payment", "setup"]),
     productQuantity: z.number().optional().default(1),
     productKey: z.string(),
-    successUrl: z.string(),
-    cancelUrl: z.string()
 })
 
 export const billingPortalSchema = z.object({
@@ -36,17 +34,21 @@ export interface StripeProps<T extends Record<string,any>> {
 }
 
 export type CreateCheckoutSessionProps = {
-    mode?: "subscription" | "payment" | "setup",
+    userId: string,
+    mode: "subscription" | "payment" | "setup",
     productQuantity?: number,
     productKey: string,
     successUrl: string,
     cancelUrl: string,
-    req: NextRequest
 }
 
 export type CreateBillingPortalProps = {
+    userId: string,
     returnUrl: string,
-    req: NextRequest
+}
+
+export type CreateCustomerProps = {
+    userId: string,
 }
 
 export interface StripeSubscription {

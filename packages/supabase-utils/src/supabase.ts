@@ -1,6 +1,4 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { logger } from "@delofarag/base-utils"
-import { UUID } from "crypto";
 
 /**
  * @example CONSTRUCTOR:
@@ -47,21 +45,21 @@ export class SupabaseTable<T extends Record<string,any>> {
      */
     async select({columns , where, ordered_by, limited_to}:{
         columns:Array<keyof T | "*">, 
-        where?:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | UUID | undefined}>,
+        where?:Array<{column:keyof T | (string & {}),is:any}>,
         ordered_by?:{column:keyof T | (string & {}), descending:boolean},
         limited_to?:number,
         first?:false
     }): Promise<Array<Record<keyof T,any>>>
     async select({columns , where, ordered_by, limited_to}:{
         columns:Array<keyof T | "*">, 
-        where?:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | UUID | undefined}>,
+        where?:Array<{column:keyof T | (string & {}),is:any}>,
         ordered_by?:{column:keyof T | (string & {}), descending:boolean},
         limited_to?:number,
         first:true
     }): Promise<Record<keyof T,any> | null>
     async select({columns , where, ordered_by, limited_to, first = false}:{
         columns:Array<keyof T | "*">, 
-        where?:Array<{column:keyof T | (string & {}),is:string | number | boolean | Date | null | UUID | undefined}>,
+        where?:Array<{column:keyof T | (string & {}),is:any}>,
         ordered_by?:{column:keyof T | (string & {}), descending:boolean},
         limited_to?:number,
         first?:boolean
@@ -102,7 +100,7 @@ export class SupabaseTable<T extends Record<string,any>> {
      * @param where - die Filter die genau sagen welche Zeile sich aktualisieren soll, sonst wird jede Zeile aktualisiert!!!
      * @returns die geupdateten Zeilen, also die Zeilen die du aktualisiert hast
      */
-    async update({where,update}:{ where:Array<{column:keyof T | (string & {}),is:any}>, update:NestedUpdate<T> }){
+    async update({where,update}:{ where:Array<{column:keyof T | (string & {}), is:any}>, update:NestedUpdate<T> }){
         // 1. Objekt flach machen (Dot-Notation für JSON-Properties)
         const flatUpdate = this.flattenNested(update as Record<string, any>);
         
@@ -120,7 +118,7 @@ export class SupabaseTable<T extends Record<string,any>> {
      * @param where - die Filter die genau sagen welche Zeile gelöscht werden soll, sonst wird jede Zeile gelöscht!!!
      * @returns garnichts, führt einfach nur eine Löschaktion aus
      */
-    async delete({where}:{ where:Array<{column:keyof T,is:string | number | boolean | Date | null | undefined}> }){
+    async delete({where}:{ where:Array<{column:keyof T, is:any}> }){
         let query = this.supabase.from(this.tableName).delete()
         for ( const {column,is} of where){
             query = query.eq(column as string,is)
@@ -138,7 +136,7 @@ export class SupabaseTable<T extends Record<string,any>> {
      * @returns die upserteten Zeilen, also die Zeilen die du upsertet hast
      */
     async upsert({where,upsert,onConflict}:{ 
-        where:Array<{column:keyof T,is:string | number | boolean | Date | null | undefined}>, 
+        where:Array<{column:keyof T, is:any}>, 
         upsert:Partial<T>,
         onConflict:keyof T | (string & {})
     }){
@@ -192,10 +190,10 @@ export class SupabaseTable<T extends Record<string,any>> {
     public async getRow({...values}:Partial<T>):Promise<T>{
         const row = await this.getRows({...values})
         if(row.length > 1){
-            throw new Error("Multiple rows found for values: " + JSON.stringify(values) + ", returning null")
+            throw new Error("error in '.getRow()': Multiple rows found for values: " + JSON.stringify(values) + ", returning null")
         }
         if(row && row.length === 0){
-            throw new Error("No row found for values: " + JSON.stringify(values) + ", returning null")
+            throw new Error("error in '.getRow()': No row found for values: " + JSON.stringify(values) + ", returning null")
         }
         return row[0]
     }
@@ -210,11 +208,11 @@ export class SupabaseTable<T extends Record<string,any>> {
     public async saveGetRow({...values}:Partial<T>):Promise<T | null>{
         const row = await this.getRows({...values})
         if(row.length > 1){
-            logger.error("Multiple rows found for values: " + JSON.stringify(values) + ", returning null")
+            console.error("Multiple rows found for values: " + JSON.stringify(values) + ", returning null")
             return null
         }
         if(row && row.length === 0){
-            logger.error("No row found for values: " + JSON.stringify(values) + ", returning null")
+            console.error("No row found for values: " + JSON.stringify(values) + ", returning null")
             return null
         }
         return row[0]

@@ -1,14 +1,6 @@
-import { createClient, type Provider, SupabaseClient } from "@supabase/supabase-js";
+import { type Provider, SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 import axios from "axios";
-
-export type SupabaseClientConfig = {
-    url: string
-    anonKey: string
-}
-
-export function createSupabaseClient(config: SupabaseClientConfig): SupabaseClient {
-    return createClient(config.url, config.anonKey)
-}
 
 /**
  * sendet die relevantesten daten der session an ein backend. 
@@ -18,7 +10,7 @@ export function createSupabaseClient(config: SupabaseClientConfig): SupabaseClie
  * @param toBackend = das ist die backend url an der du deine session schicken willst
  * @returns backend-response
  */
-export async function sendSession<T>({supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!), toBackend,extraData}:{supabase?: SupabaseClient,toBackend:string, extraData?:any}){
+export async function sendSession<T>({supabase = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!), toBackend,extraData}:{supabase?: SupabaseClient,toBackend:string, extraData?:any}){
     const { data, error:sessionError } = await supabase.auth.getSession()
     console.log(`google_access_token:${data.session?.provider_token}`)
     console.log(`google_refresh_token:${data.session?.provider_refresh_token}`)
@@ -82,7 +74,7 @@ export interface OAuthProps{
  * @param redirectTo - die url auf die der user zurückgeleitet wird nach dem login, muss in supabase als autorisierte url eingetragen sein
  * @returns nichts, startet einfach den OAuth login prozess
  */
-export async function OAuthLogin({supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!), provider = "google",scopes,redirectTo}:OAuthProps & {supabase?: SupabaseClient}){
+export async function OAuthLogin({supabase = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!), provider = "google",scopes,redirectTo}:OAuthProps & {supabase?: SupabaseClient}){
     if(!supabase) throw new Error("No supabase client provided, check your .env file (NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY) or give in a instance yourself")
         const { error:SignInError } = await supabase.auth.signInWithOAuth({
             provider: provider,
@@ -96,10 +88,11 @@ export async function OAuthLogin({supabase = createClient(process.env.NEXT_PUBLI
 
 /**
  * holt das user-objekt von supabase (nicht zu verwechseln mit einer row aus deiner tabelle) aus der session
+ * WICHTIG: throwed einen new Error bei einem fehler, für self-handling errors nutze 'safeGetUser()'
  * @param supabase - der Supabase Client, standardmäßig ist es der client mit den .env variablen
  * @returns das user-objekt
  */
-export async function getUser({supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)}:{supabase?: SupabaseClient} = {}){
+export async function getUser({supabase = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)}:{supabase?: SupabaseClient} = {}){
     const { data: { user }, error } = await supabase.auth.getUser()
     if(error) throw new Error("Error beim user kriegen in der 'getUser' function, Error: " + error)
     if(!user) throw new Error("Kein User gekriegt beim 'getUser' function call!")
@@ -107,13 +100,38 @@ export async function getUser({supabase = createClient(process.env.NEXT_PUBLIC_S
 }
 
 /**
+ * holt das user-objekt von supabase (nicht zu verwechseln mit einer row aus deiner tabelle) aus der session
+ * WICHTIG: returns null bei einem fehler also handlest du den error selbst, für self-handling errors nutze 'getUser()'
+ * @returns das user-objekt oder null
+ */
+export async function safeGetUser({supabase = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)}:{supabase?: SupabaseClient} = {}){
+    const { data: { user }, error } = await supabase.auth.getUser()
+    if(error) return null
+    if(!user) return null
+    return user
+}
+
+/**
  * gibt dir die supabase session
+ * WICHTIG: throwed einen new Error bei einem fehler, für self-handling errors nutze 'safeGetSession()'
  * @param supabase - der Supabase Client, standardmäßig ist es der client mit den .env variablen
  * @returns die session
  */
-export async function getSession({supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)}:{supabase?: SupabaseClient} = {}){
+export async function getSession({supabase = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)}:{supabase?: SupabaseClient} = {}){
     const { data: { session }, error } = await supabase.auth.getSession()
     if(error) throw new Error("Error beim session kriegen in der 'getSession' function, Error: " + error)
     if(!session) throw new Error("Keine Session gekriegt beim 'getSession' function call!")
+    return session
+}
+
+/**
+ * gibt dir die supabase session
+ * WICHTIG: returns null bei einem fehler also handlest du den error selbst
+ * @returns die session oder null
+ */
+export async function safeGetSession({supabase = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)}:{supabase?: SupabaseClient} = {}){
+    const { data: { session }, error } = await supabase.auth.getSession()
+    if(error) return null
+    if(!session) return null
     return session
 }

@@ -77,38 +77,5 @@ export class Rule<T = any> {
     }
 }
 
-//test
-
-interface User {
-    name:string, 
-    age:number,
-    email:`${string}@${string}.${string}`
-    is_admin:boolean
-    has_payed:boolean
-    tier: "free" | "pro" | "enterprise"
-}
-
-const user:User = {
-    name: "John Doe",
-    age: 20,
-    email: "john.doe@example.com",
-    is_admin: false,
-    has_payed: false,
-    tier: "free"
-}
-
-const rule = Rule
-    .is(user => user.age > 18)
-    .and(user => !user.is_admin)
-    .and(user => user.has_payed)
-    .or(Rule
-        .is(user => user.tier === "free")
-        .and(user => !user.has_payed)
-        .and(user => user.age === 21))
-    .or(Rule
-        .is(user => user.name === "John Doe")
-        .and(user => user.age === 20)
-        .and(user => user.email === "john.doe@example.com"))
 
 
-console.log(rule.allows(user))

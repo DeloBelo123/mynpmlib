@@ -1,10 +1,10 @@
 import Stripe from "stripe"
 import { SupabaseTable } from "@delofarag/supabase-utils"
-import { getUser } from "@delofarag/supabase-utils/server"
 import { NextRequest, NextResponse } from "next/server"
 import {
-    type CreateCheckoutSessionProps, 
+    type CreateCheckoutSessionProps,
     type CreateBillingPortalProps,
+    type CreateCustomerProps,
     type StripeTable,
     type WebhookConfig,
     type StripeProps,
@@ -39,74 +39,56 @@ export class StripeHandler<T extends StripeTable = StripeTable> {
     }
 
     /**
-     * diese function erstellt eine checkout-session für das gegebene produkt, returned dem frontend die session
-     * für die url des checkouts damit der user das produkt kaufen kann
-     * @param mode default = "subscription", der mode der checkout-session
-     * @param productQuantity default = 1, die menge des produkts, die der user kaufen will
-     * @param productKey der produktKey, welches ein alias für die price-id ist
-     * @param successUrl die url, zu der der user weitergeleitet wird, wenn die session erfolgreich ist
-     * @param cancelUrl die url, zu der der user weitergeleitet wird, wenn die session abgebrochen wird
-     * @param req die request, die die session erstellt (http req vom front-end welches cookies enthält)
-     * @return das checkout-session object
+     * Erstellt eine Checkout-Session für das gegebene Produkt.
+     * userId = Supabase-Auth-ID (wird vom Aufrufer, z.B. oRPC, nach getUser() übergeben).
      */
-    public async createCheckoutSession({mode = "subscription",productQuantity = 1,productKey,successUrl,cancelUrl,req}:CreateCheckoutSessionProps) {
-        try{        
+    public async createCheckoutSession({ userId, mode, productQuantity = 1, productKey, successUrl, cancelUrl }: CreateCheckoutSessionProps) {
+        try {
             const productPrice = this.products[productKey]?.priceId
             if (!productPrice) throw new Error(`Unknown productKey: ${productKey}`)
 
-            //getting the user
-            const userInSession = await getUser({req})
-            let user = await this.dataTable.getRow({ id: userInSession.id } as Partial<T>)
-            if(!user.stripe_id){
-                user = await this.createCustomer({req})
-            }   
+            let user = await this.dataTable.getRow({ id: userId } as Partial<T>)
+            if (!user.stripe_id) {
+                user = await this.createCustomer({ userId })
+            }
 
             const session = await this.stripe.checkout.sessions.create({
-                client_reference_id: userInSession.id,
+                client_reference_id: userId,
                 customer: user.stripe_id ?? undefined,
                 customer_email: user.stripe_id ? undefined : (user.email ?? undefined),
-
-                mode: mode,
-                line_items: [{price: productPrice, quantity: productQuantity}],
+                mode,
+                line_items: [{ price: productPrice, quantity: productQuantity }],
                 success_url: successUrl,
                 cancel_url: cancelUrl,
                 locale: 'de',
                 metadata: { price_id: productPrice },
             })
             return session
-        }catch(error){
+        } catch (error) {
             console.log("Error creating checkout session:", error)
             throw error
         }
     }
 
     /**
-     * diese function erstellt einen stripe customer für den user, wenn er noch keinen hat.
-     * das bedeutet das wenn der user keine stripe_id besitzt, das er jetzt eine bekommt und ein "customer" wird
-     * @param req die request, die die customer erstellt (http req vom front-end welches cookies enthält)
-     * @return den user (die row in der tablle)
+     * Erstellt einen Stripe-Customer für den User, wenn er noch keinen hat.
+     * userId = Supabase-Auth-ID (vom Aufrufer übergeben).
      */
-    public async createCustomer({ req }: { req: NextRequest }): Promise<T> {
-        try{
-            const userInSession = await getUser({req})
+    public async createCustomer({ userId }: CreateCustomerProps): Promise<T> {
+        try {
+            const user = await this.dataTable.getRow({ id: userId } as Partial<T>)
+            if (user.stripe_id) return user
 
-            //check if user is already a customer
-            const user = await this.dataTable.getRow({ id: userInSession.id } as Partial<T>)
-            if(user.stripe_id){
-                return user
-            }
-
-            //create customer
             const customer = await this.stripe.customers.create({
-                email: userInSession.email!,
-                metadata: { supabaseId: String(userInSession.id) }
+                email: user.email ?? undefined,
+                metadata: { supabaseId: String(userId) },
             })
             await this.dataTable.update({
-                where:[{column:"id", is:userInSession.id}],
-                update:{stripe_id:customer.id} as T
+                where: [{ column: "id", is: userId }],
+                update: { stripe_id: customer.id } as T,
             })
-            return await this.dataTable.getRow({ id: userInSession.id } as Partial<T>)
-        }catch(error){
+            return await this.dataTable.getRow({ id: userId } as Partial<T>)
+        } catch (error) {
             console.log("Error creating customer:", error)
             throw error
         }
@@ -117,16 +99,15 @@ export class StripeHandler<T extends StripeTable = StripeTable> {
      * @param req die request, die die session erstellt (http req vom front-end welches cookies enthält)
      * @return das billing-portal-session object
      */
-    public async createBillingPortal({returnUrl,req}:CreateBillingPortalProps): Promise<Stripe.Response<Stripe.BillingPortal.Session> | undefined>{
-        try{
-            const userInSession = await getUser({req})
-            const user = await this.dataTable.getRow({ id: userInSession.id } as Partial<T>)
-            if(!user.stripe_id){
-                console.error("No stripe id found for user with the id: " + userInSession.id)
+    public async createBillingPortal({ userId, returnUrl }: CreateBillingPortalProps): Promise<Stripe.Response<Stripe.BillingPortal.Session> | undefined>{
+        try {
+            const user = await this.dataTable.getRow({ id: userId } as Partial<T>)
+            if (!user.stripe_id) {
+                console.error("No stripe id found for user with the id, cant open billing portal: " + userId)
                 return
             }
             const portal = await this.stripe.billingPortal.sessions.create({
-                customer: user.stripe_id!,
+                customer: user.stripe_id,
                 return_url: returnUrl
             })
             return portal
@@ -308,7 +289,10 @@ export class StripeHandler<T extends StripeTable = StripeTable> {
             }
             
             default:
-                console.warn(`Unknown event type: ${event.type}`)
+                // Stripe sendet viele Event-Typen; nur die oben behandelten haben Handler. Rest bewusst ignoriert, 200 bleibt.
+                if (process.env.NODE_ENV === "development") {
+                    console.warn(`Unknown event type: ${event.type}`)
+                }
                 break;
             }
         

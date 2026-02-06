@@ -1,48 +1,68 @@
-import { SupabaseClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
-
-/** Strukturell kompatibel mit NextRequest (next/server) – nur Cookie-API. */
-export type ReqWithCookies = {
-    cookies: { getAll(): { name: string; value: string }[]; set(name: string, value: string): void };
-} & Record<any,any>;
+import { cookies } from "next/headers";
 
 /**
  * Erstellt einen Supabase-Client für den Server.
  * .env = NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
- * @param req NextRequest von next/server (Route Handler) passt hier rein.
  */
-export function createServerSupabase(req: ReqWithCookies): SupabaseClient {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-        throw new Error("NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY is not set!");
-    }
-    const c = req.cookies;
-    const cookies = {
-        getAll: () => c.getAll(),
-        setAll(cookies: { name: string; value: string; options?: any }[]) {
-            for (const x of cookies) c.set(x.name, x.value);
-        },
-    };
+export async function createServerSupabase() {
+    const cookieStore = await cookies();
+  
     return createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        { cookies }
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
+            } catch {
+              // The `setAll` method was called from a Server Component.
+              // This can be ignored if you have middleware refreshing
+              // user sessions.
+            }
+          },
+        },
+      }
     );
+  }
+
+  /**
+   * returns the user from the cookies wich were refreshed by the middleware (DONT FORGET MIDDLEWARE)
+   * WICHTIG: throwed einen new Error bei einem fehler, für self-handling errors nutze 'safeGetUser()'
+   * @returns the user 
+   */
+export async function getUser() {
+    const supabase = await createServerSupabase();
+    const { data, error } = await supabase.auth.getClaims();
+    if (error || !data?.claims) {
+        throw new Error(`Error getting claims: ${error?.message}`);
+    }
+    
+    return {
+        id: data.claims.sub,
+        email: data.claims.email,
+    }
 }
 
-export async function getUser({ req }: { req: ReqWithCookies }) {
-    const supabase = createServerSupabase(req)
-    const { data: { user }, error } = await supabase.auth.getUser()
-    if (error) throw new Error(`Error getting user: ${error.message}`)
-    if (!user) throw new Error("No user found")
-    return user
-}
-
-export async function getSession({ req }: { req: ReqWithCookies }) {
-    const supabase = createServerSupabase(req)
-    const { data: { session }, error } = await supabase.auth.getSession()
-    if (error) throw new Error(`Error getting session: ${error.message}`)
-    if (!session) throw new Error("No session found")
-    return session
+/**
+ * returns the user from the cookies wich were refreshed by the middleware (DONT FORGET MIDDLEWARE)
+ * WICHTIG: returns null bei einem fehler also handlest du den error selbst
+ * @returns the user or null
+ */
+export async function safeGetUser() {
+    const supabase = await createServerSupabase();
+    const { data, error } = await supabase.auth.getClaims();
+    if (error || !data?.claims) {
+        return null;
+    }
+    return {
+        id: data.claims.sub,
+        email: data.claims.email,
+    }
 }
   
 
