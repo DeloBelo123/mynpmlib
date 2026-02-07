@@ -19,7 +19,7 @@ import {
     ChatPromptTemplate
 } from "./imports"
 
-interface CheckpointRow {
+interface SupabaseCheckpointRow {
     thread_id: string
     checkpoint: Checkpoint
     metadata: CheckpointMetadata
@@ -31,9 +31,9 @@ interface CheckpointRow {
  * needs testing!!!
  */
 export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
-    private table: SupabaseTable<CheckpointRow>
+    private table: SupabaseTable<SupabaseCheckpointRow>
     
-    constructor(supabaseTable: SupabaseTable<CheckpointRow>) {
+    constructor(supabaseTable: SupabaseTable<SupabaseCheckpointRow>) {
         super()
         this.table = supabaseTable
     }

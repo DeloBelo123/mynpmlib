@@ -1,3 +1,4 @@
+import { getLLM } from "../helpers"
 import { 
     BaseChatModel,
     StructuredOutputParser,
@@ -16,13 +17,17 @@ export const DEFAULT_SCHEMA = z.object({
 
 interface ChainProps<T extends z.ZodObject<any,any>>{
     prompt?:string | Array<string | MessagesPlaceholder<any>>
-    llm:BaseChatModel
+    llm?:BaseChatModel
     schema?:T
 }
 
 /**
  * CONSTRUCTOR:
- * @example constructor({prompt = "du bist ein hilfreicher Assistent",llm,schema}:ChainProps<T>){
+ * @example constructor({
+        prompt = "du bist ein hilfreicher Assistent",
+        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+        schema = DEFAULT_SCHEMA as unknown as T as T
+    }:ChainProps<T>){
         this.prompt = typeof prompt === "string" ? [["system", prompt]] : Array.isArray(prompt) ? prompt.map((p:string | MessagesPlaceholder<any>)=>{
             if(typeof p === "string"){
                 return ["system", p]
@@ -31,7 +36,7 @@ interface ChainProps<T extends z.ZodObject<any,any>>{
             }
         }) : []
         this.llm = llm
-        this.schema = (schema ?? DEFAULT_SCHEMA) as unknown as T
+        this.schema = schema
         this.parser = StructuredOutputParser.fromZodSchema(this.schema)
     }
  */
@@ -43,7 +48,11 @@ export class Chain<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> {
     private llm:BaseChatModel
     private schema:T
 
-    constructor({prompt = "du bist ein hilfreicher Assistent",llm,schema}:ChainProps<T>){
+    constructor({
+        prompt = "du bist ein hilfreicher Assistent",
+        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+        schema = DEFAULT_SCHEMA as unknown as T as T
+    }:ChainProps<T>){
         this.prompt = typeof prompt === "string" ? [["system", prompt]] : Array.isArray(prompt) ? prompt.map((p:string | MessagesPlaceholder<any>)=>{
             if(typeof p === "string"){
                 return ["system", p]
@@ -52,7 +61,7 @@ export class Chain<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> {
             }
         }) : []
         this.llm = llm
-        this.schema = (schema ?? DEFAULT_SCHEMA) as unknown as T
+        this.schema = schema
         this.parser = StructuredOutputParser.fromZodSchema(this.schema)
     }
 

@@ -4,8 +4,9 @@ import { SmartCheckpointSaver } from "../memory"
 import { Chain, DEFAULT_SCHEMA } from "./chain"
 import { MemorySaver } from "../imports"
 import { z } from "zod/v3"
+import { getLLM } from "../helpers"
 
-type MemoryChainProps<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> = { llm:BaseChatModel,memory?: BaseCheckpointSaver } & ({
+type MemoryChainProps<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> = { llm?:BaseChatModel,memory?: BaseCheckpointSaver } & ({
     chain: Chain<T>
 } | {
     prompt?: string | Array<string | MessagesPlaceholder<any>>
@@ -14,14 +15,14 @@ type MemoryChainProps<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> = 
 
 /**
  * CONSTRUCTOR
- * @example  constructor({memory, ...rest}: MemoryChainProps<T> = {}){
-        this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm })
+ * @example constructor({memory, ...rest}: MemoryChainProps<T>){
+        this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}) })
         if ("chain" in rest){
             this.chain = rest.chain
         } else {
             this.chain = new Chain<T>({
-                llm: rest.llm,
-                prompt: rest.prompt ?? "Du bist ein hilfreicher Chatbot der mit dem User ein höffliches und hilfreiches Gespräch führt",
+                llm: rest.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+                prompt: rest.prompt ?? "Du bist ein hilfreicher Assistent der mit dem User ein höffliches und hilfreiches Gespräch führt",
                 schema: (rest.schema ?? DEFAULT_SCHEMA) as unknown as T
             })
         }
@@ -42,12 +43,12 @@ export class MemoryChain<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA>
     private chain: Chain<T>
 
     constructor({memory, ...rest}: MemoryChainProps<T>){
-        this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm })
+        this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}) })
         if ("chain" in rest){
             this.chain = rest.chain
         } else {
             this.chain = new Chain<T>({
-                llm: rest.llm,
+                llm: rest.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
                 prompt: rest.prompt ?? "Du bist ein hilfreicher Assistent der mit dem User ein höffliches und hilfreiches Gespräch führt",
                 schema: (rest.schema ?? DEFAULT_SCHEMA) as unknown as T
             })

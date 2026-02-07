@@ -63,6 +63,20 @@ export function getLLM(config: LLMConfig) {
   }
 }
 
+/**
+ * Create a structured output parser and prompt for a given Zod schema
+ * @example
+ * const schema = outputschema(z.object({
+ *   name: z.string(),
+ *   age: z.number(),
+ * }));
+ * const prompt = `du bist ein informations-filterer, suche den namen und den alter der person im text aus in dieser struktur: ${schema.prompt}`
+ * const chain = createSimpleChain(prompt, llm, schema.parser)
+ * const result = await chain.invoke({ input: "John is 30 years old" })
+ * console.log(result)
+ * @param zodschema - The Zod schema to parse the output
+ * @returns An object containing the prompt and parser
+ */
 export function outputschema(zodschema: z.ZodObject<any>): {
   prompt: string
   parser: StructuredOutputParser<any>

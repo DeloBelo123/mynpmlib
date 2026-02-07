@@ -6,7 +6,7 @@ import { VectorStore } from "../imports"
 import { turn_to_docs } from "../rag"
 import { createReactAgent } from "../imports"
 import { HumanMessage} from "../imports"
-import { stream } from "../helpers"
+import { getLLM, stream } from "../helpers"
 import { structure } from "../magic-funcs/parsers/structure"
 
 interface AgentProps<T extends z.ZodObject<any,any>>{
@@ -21,8 +21,8 @@ interface AgentProps<T extends z.ZodObject<any,any>>{
  * CONSTRUCTOR:
  * @example constructor({
         prompt = `Du bist ein hilfreicher Assistent.`,
+        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
         tools,
-        llm,
         schema,
         memory
     }: AgentProps<T>) {
@@ -54,8 +54,8 @@ export class Agent<T extends z.ZodObject<any,any>> {
 
     constructor({
         prompt = `Du bist ein hilfreicher Assistent.`,
+        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
         tools,
-        llm,
         schema,
         memory
     }: AgentProps<T>) {
@@ -76,12 +76,12 @@ export class Agent<T extends z.ZodObject<any,any>> {
     public async invoke(invokeInput: Record<string, any> & { thread_id?: string, debug?: boolean }): Promise<T extends undefined ? string : z.infer<T>> {
         const { thread_id, debug, ...variables } = invokeInput
 
-        if(this.memory && !thread_id) throw new Error("thread_id is required when using a vector store, else no memory is stored")
-        if(!this.memory && thread_id) console.warn("thread_id is provided but no vector store is set, so no memory is stored")
+        if(this.memory && !thread_id) throw new Error("thread_id is required when using memory, else no memory is stored")
+        if(!this.memory && thread_id) console.warn("WARN: thread_id is provided but no memory is set, so no memory is stored")
         
         const humanMessages: HumanMessage[] = Object.entries(variables).map(
             ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
-        )
+        );
 
         // Tools für diesen invoke (inkl. RAG falls vorhanden)
         const activeTools = this.rag_tool 

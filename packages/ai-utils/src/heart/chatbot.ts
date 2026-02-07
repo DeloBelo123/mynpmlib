@@ -1,9 +1,10 @@
 import { BaseCheckpointSaver, HumanMessage, AIMessage, LangGraphRunnableConfig, BaseMessage, CheckpointMetadata, VectorStore, DynamicStructuredTool, MessagesPlaceholder } from "../imports"
 import { BaseChatModel } from "../imports"
+import { getLLM } from "../helpers"
 import { SmartCheckpointSaver } from "../memory"
 import { MemorySaver } from "../imports"
 import { logChunk } from "../helpers"
-import { input } from "@delofarag/base-utils"
+import { input } from "@delofarag/base-utils/server"
 import { MemoryChain } from "./memorychain"
 import { Agent } from "./agent"
 
@@ -16,37 +17,48 @@ type ChatbotProps = {
 
 /**
  * CONSTRUCTOR:
- * @example constructor({llm,prompt = "Du bist ein hilfreicher chatbot der mit dem User ein höffliches und hilfreiches Gespräch führt",tools,memory}:ChatbotProps){
+ * @example constructor({
+        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+        memory = new SmartCheckpointSaver(new MemorySaver(),{ llm: llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""})}),
+        prompt = "Du bist ein hilfreicher chatbot der mit dem User ein höffliches und hilfreiches Gespräch führt",
+        tools,
+    }:ChatbotProps){
         if(tools){
             this.agent = new Agent({
-                memory: memory ?? new SmartCheckpointSaver(new MemorySaver(),{ llm }),
+                memory: memory,
                 tools : tools,
                 prompt: prompt,
                 llm: llm
             })
         } else {
             this.chain = new MemoryChain({
-                memory: memory ?? new SmartCheckpointSaver(new MemorySaver(),{ llm }),
+                memory: memory,
                 prompt: prompt,
                 llm: llm
             })
         }
+    }
  */
 export class Chatbot {
     private chain: MemoryChain | undefined
     private agent: Agent<any> | undefined
 
-    constructor({llm,prompt = "Du bist ein hilfreicher chatbot der mit dem User ein höffliches und hilfreiches Gespräch führt",tools,memory}:ChatbotProps){
+    constructor({
+        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+        memory = new SmartCheckpointSaver(new MemorySaver(),{ llm: llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""})}),
+        prompt = "Du bist ein hilfreicher chatbot der mit dem User ein höffliches und hilfreiches Gespräch führt",
+        tools,
+    }:ChatbotProps){
         if(tools){
             this.agent = new Agent({
-                memory: memory ?? new SmartCheckpointSaver(new MemorySaver(),{ llm }),
+                memory: memory,
                 tools : tools,
                 prompt: prompt,
                 llm: llm
             })
         } else {
             this.chain = new MemoryChain({
-                memory: memory ?? new SmartCheckpointSaver(new MemorySaver(),{ llm }),
+                memory: memory,
                 prompt: prompt,
                 llm: llm
             })
