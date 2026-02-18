@@ -1,10 +1,14 @@
-import { getLLM, Chain } from "../../ai-utils/src";
+import { getLLM, Chain, createSupabaseVectoreStore, createFaissStore } from "../../ai-utils/src";
+import { z } from "zod/v3"
 import global_load_envs from "../load_envs"
 global_load_envs()
 
-const llm = getLLM({
-    type:"groq",
-    apikey: process.env.CHATGROQ_API_KEY!,
-})
+const vectorStore = await createFaissStore(["Ich heisse Delo", "Ich bin 18 Jahre alt", "Ich mag Käse"])
+const chain = new Chain({ vectorStore })
 
-const chain = new Chain({ llm })
+
+async function main(){
+    const respo = await chain.invoke({input:"wie heisse ich?"})
+    console.log(respo.output)
+}
+main()

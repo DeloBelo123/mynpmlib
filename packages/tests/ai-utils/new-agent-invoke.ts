@@ -1,4 +1,4 @@
-import { Agent, getLLM, DEFAULT_SCHEMA,  } from "../../ai-utils/src";
+import { Agent, getLLM, DEFAULT_OUTPUT_SCHEMA,  } from "../../ai-utils/src";
 import { DynamicStructuredTool } from "../../ai-utils/src/imports";
 import { toolRegistry } from "./registry-test";
 import { z } from "zod/v3"
