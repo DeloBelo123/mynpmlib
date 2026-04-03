@@ -29,25 +29,26 @@ Du kannst jederzeit ein eigenes LLM übergeben (z.B. anderes Modell, anderer Pro
 
 ### 1. Chain
 
-**Was:** Stateless LLM-Chain mit strukturiertem Output (Zod-Schema) und optionalem RAG.
+**Was:** Stateless LLM-Chain mit strukturiertem Output (Zod-Schema) und optionalem RAG. Für `output` (Zod v3) kannst du **z.object()** oder **z.record()** verwenden.
 
 **Wann:** Einmalige Abfragen ohne Konversationsgedächtnis. Ideal für formularähnliche Eingabe → strukturierte Ausgabe.
 
 **Initialisierung:**
 
 ```ts
-import { Chain, DEFAULT_SCHEMA } from "@delofarag/ai-utils"
+import { Chain, DEFAULT_OUTPUT_SCHEMA } from "@delofarag/ai-utils"
 import { z } from "zod/v3"
 
-const schema = z.object({
+const output = z.object({
     output: z.string().describe("Deine Antwort"),
     score: z.number().optional()
 })
+// alternativ: z.record(z.string()) für beliebige Key-Value-Struktur
 
 const chain = new Chain({
     prompt: "Du bist ein hilfreicher Assistent.",
     // llm optional – Default: Groq
-    schema
+    output
 })
 
 const result = await chain.invoke({ input: "Was ist die Hauptstadt von Frankreich?" })
@@ -56,7 +57,7 @@ const result = await chain.invoke({ input: "Was ist die Hauptstadt von Frankreic
 
 **RAG:** Mit `chain.setContext(vectorStore)` und `chain.addContext(["Text 1", "Text 2"])` wird automatisch Retrieval vor dem LLM-Call eingebaut.
 
-**Warum so:** Chain ist die kleinste Einheit – nur Prompt + LLM + Schema. Kein Memory, keine Tools. Einfach zu testen und zu komponieren.
+**Warum so:** Chain ist die kleinste Einheit – nur Prompt + LLM + Output (Zod-Schema für .invoke()). Kein Memory, keine Tools. Einfach zu testen und zu komponieren.
 
 ---
 
@@ -98,24 +99,32 @@ const result2 = await memoryChain.invoke({
 
 ### 3. Agent
 
-**Was:** LLM mit Tools (z.B. Web-Suche, API-Calls). Nutzt LangGraphs `createReactAgent` unter der Haube.
+**Was:** LLM mit Tools (z.B. Web-Suche, API-Calls, RAG). Nutzt LangGraphs `createReactAgent` unter der Haube.
 
 **Wann:** Wenn das LLM externe Aktionen ausführen soll (Suche, Rechner, Datenbank, etc.).
 
 **Initialisierung:**
 
 ```ts
-import { Agent, ToolRegistry, tavilySearchTool, getLLM } from "@delofarag/ai-utils"
+import { Agent, ToolRegistry, createRAGTool, createFaissStore, tavilySearchTool, getLLM } from "@delofarag/ai-utils"
+
+const vectorStore = await createFaissStore(["Dokumenteninhalt..."])
+const ragTool = createRAGTool({
+    vectorStore,
+    name: "search_context",
+    description: "Durchsucht den Kontext nach relevanten Informationen"
+})
 
 const registry = new ToolRegistry([
     { name: "calculator", description: "...", schema: z.object({ a: z.number(), b: z.number() }), func: ({ a, b }) => a + b },
-    tavilySearchTool
-] as const)
+    tavilySearchTool,
+    ragTool
+])
 
 const agent = new Agent({
     prompt: "Du bist ein hilfreicher Assistent mit Zugang zu Tools.",
     tools: registry.allTools,
-    llm: getLLM({ type: "groq", apikey: process.env.CHATGROQ_API_KEY! }),
+    llm: getLLM({ type: "groq" }),
     memory: new SmartCheckpointSaver(new MemorySaver(), { llm }) // optional
 })
 
@@ -123,35 +132,42 @@ const result = await agent.invoke({
     thread_id: "session-1",  // nötig wenn memory gesetzt
     input: "Was steht heute in den Nachrichten zu KI?"
 })
+
+agent.addTool(weiteresTool)  // Tools nachträglich hinzufügen
 ```
 
-**RAG:** `agent.setContext(vectorStore)` erzeugt automatisch ein `search_context`-Tool, mit dem das LLM den Vector Store durchsuchen kann.
+**RAG:** RAG ist ein normales Tool – nutze `createRAGTool({ vectorStore, name, description })` und füge es zu `tools` hinzu oder via `agent.addTool()`.
 
-**Warum so:** Der Agent entscheidet selbst, wann er Tools nutzt. Die Klasse fügt dem System-Prompt Regeln hinzu, damit unnötige Tool-Calls vermieden werden.
+**Warum so:** Der Agent entscheidet selbst, wann er Tools nutzt. RAG wird wie jedes andere Tool behandelt (kein setContext/addContext mehr).
 
 ---
 
 ### 4. Chatbot
 
-**Was:** High-Level Wrapper – je nach Konfiguration entweder ein `MemoryChain` oder ein `Agent`.
+**Was:** High-Level Wrapper – je nach Konfiguration entweder ein `MemoryChain` oder ein `Agent`. Discriminated Union: `tools` → Agent, `vectorStore` → MemoryChain.
 
 **Wann:** Schnell einen chatbasierten Assistenten bauen, mit oder ohne Tools.
 
 **Initialisierung:**
 
 ```ts
-import { Chatbot, tavilySearchTool, getLLM } from "@delofarag/ai-utils"
+import { Chatbot, createRAGTool, createFaissStore, tavilySearchTool, getLLM } from "@delofarag/ai-utils"
 
-// Ohne Tools → nutzt MemoryChain
+// Ohne Tools, mit RAG → MemoryChain + vectorStore
+const vectorStore = await createFaissStore(["Kontextdaten..."])
 const simpleChatbot = new Chatbot({
-    llm: getLLM({ type: "groq", apikey: process.env.CHATGROQ_API_KEY! }),
-    prompt: "Du bist ein freundlicher Assistent."
+    llm: getLLM({ type: "groq" }),
+    prompt: "Du bist ein freundlicher Assistent.",
+    vectorStore
 })
 
-// Mit Tools → nutzt Agent
+// Mit Tools → Agent (RAG als Tool möglich)
 const toolChatbot = new Chatbot({
-    llm: getLLM({ type: "groq", apikey: process.env.CHATGROQ_API_KEY! }),
-    tools: [tavilySearchTool],
+    llm: getLLM({ type: "groq" }),
+    tools: [
+        tavilySearchTool,
+        createRAGTool({ vectorStore, name: "search", description: "Durchsucht den Kontext" })
+    ],
     prompt: "Du bist ein Assistent mit Webzugang."
 })
 
@@ -185,7 +201,7 @@ const registry = new ToolRegistry([
         schema: z.object({ name: z.string() }),
         func: ({ name }) => `Hallo, ${name}!`
     }
-] as const)  // 'as const' für besseren Autocomplete
+])
 
 const tool = registry.getTool("greet")
 const allTools = registry.allTools
@@ -256,22 +272,28 @@ const kurz = await summarize({ data: langerText, maxWords: 50 })
 
 ## RAG-Implementierungen
 
-In `rag.ts`:
+**Vector Stores** (in `rag.ts`):
 
 - **turn_to_docs(data)** – Wandelt Strings/Objekte in LangChain-`Document[]` um
 - **createSupabaseVectoreStore({ supabase, data, table_name?, RPC_function? })** – Supabase Vector Store aus Daten
 - **getSupabaseVectorStore({ supabase, table_name?, RPC_function? })** – Bestehenden Store holen
 - **createFaissStore({ data, save_path?, embeddings? })** – FAISS-Store (lokal, speicherbar)
 - **loadFaissStore({ path, embeddings? })** – FAISS-Store laden
+
+**RAG als Tool** (für Agent):
+
+- **createRAGTool({ vectorStore, name, description })** – Erzeugt ein Tool, mit dem der Agent den Vector Store durchsucht. In `tools` übergeben oder via `agent.addTool()`.
+
+**Retrieval-Chains** (in `rag.ts`):
+
 - **createRAGChain({ vectorStore, llm, prompt?, num_of_results_from_vdb? })** – Retrieval-Chain
 - **createRAGChainFromRetriever({ retriever, llm, prompt? })** – Alternative mit eigenem Retriever
 
 **Typischer Ablauf:**
 
-1. Daten mit `turn_to_docs` vorbereiten
-2. Vector Store erstellen (Supabase oder FAISS)
-3. `chain.setContext(vectorStore)` oder `agent.setContext(vectorStore)` aufrufen
-4. Optional: `addContext(docs)` für weitere Dokumente
+1. Vector Store erstellen: `createFaissStore({ data })` oder `createSupabaseVectoreStore({ data })`
+2. **Chain/MemoryChain:** `chain.setContext(vectorStore)` – RAG wird automatisch eingebaut. Optional `chain.addContext(weitereDaten)` für weitere Docs
+3. **Agent/Chatbot:** `createRAGTool({ vectorStore, name, description })` als Tool übergeben
 
 ---
 
@@ -325,14 +347,14 @@ const chatbot = new Chatbot({ llm, memory })
 
 | Util | Zweck |
 |------|-------|
-| **Chain** | Stateless LLM + Schema, optional RAG |
+| **Chain** | Stateless LLM + Schema, optional RAG (setContext/addContext) |
 | **MemoryChain** | Chain + Konversations-Memory pro thread_id, optional RAG |
-| **Agent** | LLM + Tools, optional Memory + RAG |
-| **Chatbot** | Einfacher Einstieg: MemoryChain oder Agent |
+| **Agent** | LLM + Tools, optional Memory. RAG via createRAGTool + addTool |
+| **Chatbot** | Discriminated Union: tools → Agent, vectorStore → MemoryChain |
 | **ToolRegistry** | Tools registrieren (empfohlen) |
 | **tavilySearchTool** | Web-Suche (TAVILY_API_KEY) |
 | **Magic-Funcs** | ask, websearch, classify, decide, extract, structure, rewrite, summarize, promptify, ragify |
-| **RAG** | Supabase/FAISS Vector Stores, createRAGChain |
+| **RAG** | createRAGTool, Supabase/FAISS Vector Stores, createRAGChain |
 | **SupabaseCheckpointSaver** | Persistente Memory in Supabase |
 | **SmartCheckpointSaver** | Memory mit Auto-Summarization |
 | **getLLM()** | LLM aus Groq, OpenRouter oder Ollama |

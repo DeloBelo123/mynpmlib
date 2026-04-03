@@ -1,4 +1,4 @@
-import { BaseCheckpointSaver, HumanMessage, AIMessage, LangGraphRunnableConfig, BaseMessage, CheckpointMetadata, VectorStore, DynamicStructuredTool, MessagesPlaceholder } from "../imports"
+import { BaseCheckpointSaver, VectorStore, DynamicStructuredTool } from "../imports"
 import { BaseChatModel } from "../imports"
 import { getLLM } from "../helpers"
 import { SmartCheckpointSaver } from "../memory"
@@ -13,28 +13,35 @@ type ChatbotProps = {
     prompt?: string | Array<string>
     tools?: DynamicStructuredTool[]
     memory?: BaseCheckpointSaver
-} 
+} | {
+    llm: BaseChatModel
+    prompt?: string | Array<string>
+    memory?: BaseCheckpointSaver
+    vectorStore?: VectorStore
+}
 
 /**
  * CONSTRUCTOR:
- * @example constructor({
-        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
-        memory = new SmartCheckpointSaver(new MemorySaver(),{ llm: llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""})}),
-        prompt = "Du bist ein hilfreicher chatbot der mit dem User ein höffliches und hilfreiches Gespräch führt",
-        tools,
-    }:ChatbotProps){
-        if(tools){
+ * @example 
+ * constructor(props: ChatbotProps){
+        const llm = props.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""})
+        const memory = props.memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm })
+        const prompt = props.prompt ?? "Du bist ein hilfreicher chatbot der mit dem User ein höffliches Gespräch führt"
+
+        if ("tools" in props) {
             this.agent = new Agent({
-                memory: memory,
-                tools : tools,
-                prompt: prompt,
-                llm: llm
+                memory,
+                tools: props.tools ?? [],
+                prompt,
+                llm,
             })
         } else {
+            const vectorStore = "vectorStore" in props ? props.vectorStore : undefined
             this.chain = new MemoryChain({
-                memory: memory,
-                prompt: prompt,
-                llm: llm
+                memory,
+                prompt,
+                llm,
+                vectorStore
             })
         }
     }
@@ -43,24 +50,25 @@ export class Chatbot {
     private chain: MemoryChain | undefined
     private agent: Agent<any> | undefined
 
-    constructor({
-        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
-        memory = new SmartCheckpointSaver(new MemorySaver(),{ llm: llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""})}),
-        prompt = "Du bist ein hilfreicher chatbot der mit dem User ein höffliches und hilfreiches Gespräch führt",
-        tools,
-    }:ChatbotProps){
-        if(tools){
+    constructor(props: ChatbotProps){
+        const llm = props.llm ?? getLLM({ type:"groq" })
+        const memory = props.memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm })
+        const prompt = props.prompt ?? "Du bist ein hilfreicher chatbot der mit dem User ein höffliches Gespräch führt"
+
+        if ("tools" in props) {
             this.agent = new Agent({
-                memory: memory,
-                tools : tools,
-                prompt: prompt,
-                llm: llm
+                memory,
+                tools: props.tools ?? [],
+                prompt,
+                llm,
             })
         } else {
+            const vectorStore = "vectorStore" in props ? props.vectorStore : undefined
             this.chain = new MemoryChain({
-                memory: memory,
-                prompt: prompt,
-                llm: llm
+                memory,
+                prompt,
+                llm,
+                vectorStore
             })
         }
     }
@@ -109,36 +117,6 @@ export class Chatbot {
                 console.log(`Message-limit of ${numberOfMessages} reached, stopping session`)
                 break
             }
-        }
-    }
-
-    public async addContext(data: Array<any>){
-        if (this.chain){
-            await this.chain.addContext(data)
-        } else if (this.agent) {
-            await this.agent.addContext(data)
-        } else {
-            throw Error("weder agent noch chain, kein addContext möglich")
-        }
-    }
-
-    public async setContext(vectorStore: VectorStore){
-        if (this.chain){
-            this.chain.setContext(vectorStore)
-        } else if (this.agent) {
-            this.agent.setContext(vectorStore)
-        } else {
-            throw Error("weder agent noch chain, kein setContext möglich")
-        }
-    }
-
-    public async clearContext(){
-        if (this.chain){
-            this.chain.clearContext()
-        } else if (this.agent) {
-            this.agent.clearContext()
-        } else {
-            throw Error("weder agent noch chain, kein clearContext möglich")
         }
     }
 }

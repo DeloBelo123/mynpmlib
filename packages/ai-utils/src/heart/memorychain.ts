@@ -1,21 +1,23 @@
 import { BaseCheckpointSaver, HumanMessage, AIMessage, LangGraphRunnableConfig, BaseMessage, CheckpointMetadata, VectorStore, MessagesPlaceholder, type Checkpoint } from "../imports"
 import { BaseChatModel } from "../imports"
 import { SmartCheckpointSaver } from "../memory"
-import { Chain, DEFAULT_SCHEMA } from "./chain"
+import { Chain, DEFAULT_OUTPUT_SCHEMA, type OutputSchema } from "./chain"
 import { MemorySaver } from "../imports"
 import { z } from "zod/v3"
 import { getLLM } from "../helpers"
 
-type MemoryChainProps<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> = { llm?:BaseChatModel,memory?: BaseCheckpointSaver } & ({
+type MemoryChainProps<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> = { llm?:BaseChatModel,memory?: BaseCheckpointSaver } & ({
     chain: Chain<T>
 } | {
     prompt?: string | Array<string | MessagesPlaceholder<any>>
-    schema?:T
+    output?:T
+    vectorStore?: VectorStore
 })
 
 /**
- * CONSTRUCTOR
- * @example constructor({memory, ...rest}: MemoryChainProps<T>){
+ * CONSTRUCTOR 
+ * @example 
+ * constructor({memory, ...rest}: MemoryChainProps<T>){
         this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}) })
         if ("chain" in rest){
             this.chain = rest.chain
@@ -23,7 +25,8 @@ type MemoryChainProps<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> = 
             this.chain = new Chain<T>({
                 llm: rest.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
                 prompt: rest.prompt ?? "Du bist ein hilfreicher Assistent der mit dem User ein höffliches und hilfreiches Gespräch führt",
-                schema: (rest.schema ?? DEFAULT_SCHEMA) as unknown as T
+                output: (rest.output ?? DEFAULT_OUTPUT_SCHEMA) as unknown as T
+                vectorStore: rest.vectorStore ?? undefined
             })
         }
     }
@@ -32,25 +35,27 @@ type MemoryChainProps<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> = 
  * @param props.memory 
  * @param props.chain 
  * 
- * @example oder eine chain wird anhand deines llms, schemas oder prompts erstellt + memory:
+ * @example oder eine chain wird anhand deines llms, prompts, usw... erstellt + memory:
  * @param props.memory
  * @param props.llm 
  * @param props.prompt 
- * @param props.schema
+ * @param props.output - Zod-Schema für den Rückgabewert von .invoke()
+ * @param props.vectorStore 
  */
-export class MemoryChain<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA>{
+export class MemoryChain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA>{
     private memory: BaseCheckpointSaver
     private chain: Chain<T>
 
     constructor({memory, ...rest}: MemoryChainProps<T>){
-        this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}) })
+        this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm ?? getLLM({ type:"groq" }) })
         if ("chain" in rest){
             this.chain = rest.chain
         } else {
             this.chain = new Chain<T>({
-                llm: rest.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+                llm: rest.llm ?? getLLM({ type:"groq" }),
                 prompt: rest.prompt ?? "Du bist ein hilfreicher Assistent der mit dem User ein höffliches und hilfreiches Gespräch führt",
-                schema: (rest.schema ?? DEFAULT_SCHEMA) as unknown as T
+                output: (rest.output ?? DEFAULT_OUTPUT_SCHEMA) as unknown as T,
+                vectorStore: rest.vectorStore ?? undefined
             })
         }
     }
@@ -151,14 +156,14 @@ export class MemoryChain<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA>
     }
 
     public async addContext(data: Array<any>){
-        this.chain.addContext(data)
+        await this.chain.addContext(data)
     }
 
-    public async setContext(vectorStore: VectorStore){
+    public setContext(vectorStore: VectorStore){
         this.chain.setContext(vectorStore)
     }
 
-    public async clearContext(){
+    public clearContext(){
         this.chain.clearContext()
     }
 

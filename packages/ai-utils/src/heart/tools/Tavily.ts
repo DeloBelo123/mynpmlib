@@ -1,4 +1,5 @@
 import { DynamicStructuredTool } from "@langchain/core/tools";
+import { Tool } from "./ToolRegistry";
 import { z } from "zod";
 
 type TavilyTopic = "general" | "news" | "finance";
@@ -229,19 +230,19 @@ export class TavilySearch {
 }
 
 export const tavilySearchTool = new DynamicStructuredTool({
-    func:async ({ query }: { query: string }) => {
-        const tavily = new TavilySearch({
-            tavilyApiKey: process.env.TAVILY_API_KEY,
-            topic: "general",
-            includeAnswer: false,
-            maxResults: 5,
-        });
-        return await tavily.invoke({ query });
-        
-      },
-    schema: z.object({
-        query: z.string().describe("The search query"),
-    }),
-    name: "tavily_search",
-    description: "Search the web with Tavily and return LLM-friendly results with sources.",
+  func:async ({ query }) => {
+      const tavily = new TavilySearch({
+          tavilyApiKey: process.env.TAVILY_API_KEY,
+          topic: "general",
+          includeAnswer: false,
+          maxResults: 5,
+      });
+      return await tavily.invoke({ query });
+      
+    },
+  schema: z.object({
+      query: z.string().describe("The search query"),
+  }),
+  name: "tavily_search",
+  description: "Search the web with Tavily and return LLM-friendly results with sources.",
 })

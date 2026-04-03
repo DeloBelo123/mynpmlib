@@ -8,7 +8,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
     
     constructor(tableName:string, supabase?: SupabaseClient){
         this.tableName = tableName
-        this.supabase = supabase ?? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY! || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+        this.supabase = supabase ?? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!) // wichtig für sicherheit, nur anon-key damit RLS immer da ist!
     }
  */
 export class SupabaseTable<T extends Record<string,any>> {
@@ -18,7 +18,7 @@ export class SupabaseTable<T extends Record<string,any>> {
     
     constructor(tableName:string, supabase?: SupabaseClient){
         this.tableName = tableName
-        this.supabase = supabase ?? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY! || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+        this.supabase = supabase ?? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
     }
     /**
      * @param rows - die neuen Zeilen die du in die Tabelle einfügen möchtest, als Array von Objekten, wo jedes Objekt eine Zeile ist
@@ -43,23 +43,23 @@ export class SupabaseTable<T extends Record<string,any>> {
      * @param first - gibt nur die erste Zeile zurück wenn auf true gesetzt ist, als object, anstatt eines Arrays von Zeilen (standardmäßig ist es false)
      * @returns returned ein array von Objekte, wo jedes Objekt eine Zeile der Tabelle ist, die den optionalen Filtern entspricht, wo die Keys die spaltennamen sind und die Values die Werte der Zeile
      */
-    async select({columns , where, ordered_by, limited_to}:{
+    async select<K extends keyof T>({columns , where, ordered_by, limited_to}:{
         columns:Array<keyof T | "*">, 
-        where?:Array<{column:keyof T | (string & {}),is:any}>,
+        where?:Array<{column:K,is:T[K] }>,
         ordered_by?:{column:keyof T | (string & {}), descending:boolean},
         limited_to?:number,
         first?:false
     }): Promise<Array<Record<keyof T,any>>>
-    async select({columns , where, ordered_by, limited_to}:{
+    async select<K extends keyof T>({columns , where, ordered_by, limited_to}:{
         columns:Array<keyof T | "*">, 
-        where?:Array<{column:keyof T | (string & {}),is:any}>,
+        where?:Array<{column:K,is:T[K] }>,
         ordered_by?:{column:keyof T | (string & {}), descending:boolean},
         limited_to?:number,
         first:true
     }): Promise<Record<keyof T,any> | null>
-    async select({columns , where, ordered_by, limited_to, first = false}:{
+    async select<K extends keyof T>({columns , where, ordered_by, limited_to, first = false}:{
         columns:Array<keyof T | "*">, 
-        where?:Array<{column:keyof T | (string & {}),is:any}>,
+        where?:Array<{column:K ,is:T[K] }>,
         ordered_by?:{column:keyof T | (string & {}), descending:boolean},
         limited_to?:number,
         first?:boolean
@@ -100,7 +100,7 @@ export class SupabaseTable<T extends Record<string,any>> {
      * @param where - die Filter die genau sagen welche Zeile sich aktualisieren soll, sonst wird jede Zeile aktualisiert!!!
      * @returns die geupdateten Zeilen, also die Zeilen die du aktualisiert hast
      */
-    async update({where,update}:{ where:Array<{column:keyof T | (string & {}), is:any}>, update:NestedUpdate<T> }){
+    async update<K extends keyof T>({where,update}:{ where:Array<{column:K | (string & {}), is:T[K] }>, update:NestedUpdate<T> }){
         // 1. Objekt flach machen (Dot-Notation für JSON-Properties)
         const flatUpdate = this.flattenNested(update as Record<string, any>);
         
@@ -118,7 +118,7 @@ export class SupabaseTable<T extends Record<string,any>> {
      * @param where - die Filter die genau sagen welche Zeile gelöscht werden soll, sonst wird jede Zeile gelöscht!!!
      * @returns garnichts, führt einfach nur eine Löschaktion aus
      */
-    async delete({where}:{ where:Array<{column:keyof T, is:any}> }){
+    async delete<K extends keyof T>({where}:{ where:Array<{column:K, is:T[K]}> }){
         let query = this.supabase.from(this.tableName).delete()
         for ( const {column,is} of where){
             query = query.eq(column as string,is)
@@ -135,8 +135,8 @@ export class SupabaseTable<T extends Record<string,any>> {
      * @param onConflict - die Spalte die für den Konflikt-Check verwendet wird (normalerweise Primary Key) - verwendet native Supabase .upsert()
      * @returns die upserteten Zeilen, also die Zeilen die du upsertet hast
      */
-    async upsert({where,upsert,onConflict}:{ 
-        where:Array<{column:keyof T, is:any}>, 
+    async upsert<K extends keyof T>({where,upsert,onConflict}:{ 
+        where:Array<{column:K, is:T[K]}>, 
         upsert:Partial<T>,
         onConflict:keyof T | (string & {})
     }){
@@ -182,7 +182,7 @@ export class SupabaseTable<T extends Record<string,any>> {
 
     /**
      * diese Funktion returned eine unique row von den die spalte die bein param die key des obj ist der value dessen keys entspricht.
-     * WICHTIG: es kann nur eine row returned werden, wenn anhand des params mehr als ein row oder garkeine kommt WIRD EIN ERROR GEWORFEN! (für custom-fail-handling nutze '.saveGetRow()', da wird bei einem faile-case 'null' returned )
+     * WICHTIG: es kann nur eine row returned werden, wenn anhand des params mehr als ein row oder garkeine kommt WIRD EIN ERROR GEWORFEN! (für custom-fail-handling nutze '.safeGetRow()', da wird bei einem faile-case 'null' returned )
      * IMPORTANT: TIPP: sehe den param als "where"-Filter wie bei der '.select()' function
      * @param values - die Werte die du abfragen möchtest, als Objekt wo der key der Spaltenname ist und der value der Wert
      * @returns die unique row
@@ -205,7 +205,7 @@ export class SupabaseTable<T extends Record<string,any>> {
      * @param values - die Werte die du abfragen möchtest, als Objekt wo der key der Spaltenname ist und der value der Wert
      * @returns die unique row, oder null wenn keine row gefunden wurde oder mehr als eine row gefunden wurde
      */
-    public async saveGetRow({...values}:Partial<T>):Promise<T | null>{
+    public async safeGetRow({...values}:Partial<T>):Promise<T | null>{
         const row = await this.getRows({...values})
         if(row.length > 1){
             console.error("Multiple rows found for values: " + JSON.stringify(values) + ", returning null")
@@ -252,3 +252,12 @@ export function selectTable({tableName,possibleTables}:{tableName:string,possibl
 type NestedUpdate<T> = {
     [K in keyof T]?: T[K] extends object ? T[K] | { [P in keyof T[K]]?: T[K][P] } : T[K]
 }; 
+
+
+
+
+
+
+
+
+

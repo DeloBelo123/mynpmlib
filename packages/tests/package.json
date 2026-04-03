@@ -1,0 +1,8 @@
+{
+    "name": "@my/tests",
+    "private": true,
+    "type": "module",
+    "dependencies": {
+        "@delofarag/base-utils": "workspace:*"
+    }
+}

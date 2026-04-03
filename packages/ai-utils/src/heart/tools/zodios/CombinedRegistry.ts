@@ -1,9 +1,19 @@
-import { ToolRegistry, type Tool } from "./BasicToolRegistry"
-import { ZodiosToolRegistry } from "./ZodiosToolRegistry"
-import { ZodiosEndpointWithAlias } from "./ZodiosToolRegistry"
-import type { DynamicStructuredTool } from "@langchain/core/tools"
-import { Zodios, type ApiOf } from "zodios"
 import { z } from "zod/v3"
+import { ToolRegistry, type Tool } from "../ToolRegistry"
+import { ZodiosToolRegistry } from "./ZodiosToolRegistry"
+import { DynamicStructuredTool } from "@langchain/core/tools"
+import { Zodios, type ApiOf } from "zodios"
+
+const t = new DynamicStructuredTool({
+    name:"get_weather_tool",
+    description:"get the weather of a city",
+    schema:z.object({
+        city:z.string()
+    }),
+    func:async({city})=>{
+        return `the weather of ${city} is sunny`
+    }
+})
 
 export type ExtractToolNames<T extends readonly {name:string}[]> = {
     [K in keyof T]: T[K] extends {name:string} ? T[K]['name'] : never
@@ -21,8 +31,8 @@ type ExtractToolNamesFromZodiosApi<Api extends readonly any[]> = {
         : never
 }[number]
 
-type ExtractToolNamesFromInput<T extends readonly (Tool<any> | Zodios<any>)[]> = {
-    [K in keyof T]: T[K] extends Tool<any>
+type ExtractToolNamesFromInput<T extends readonly (Tool | Zodios<any>)[]> = {
+    [K in keyof T]: T[K] extends Tool
         ? T[K]['name']
         : T[K] extends Zodios<infer Api>
         ? ExtractToolNamesFromZodiosApi<ApiOf<T[K]>>
@@ -35,8 +45,8 @@ type ExtractToolNamesFromInput<T extends readonly (Tool<any> | Zodios<any>)[]> =
 /**
  * vergiss nicht 'as const' am ende des input-arrays zu verwenden für perekten autocomplete!!!
  */
-export class CombinedToolRegistry<T extends readonly (Tool<any> | Zodios<any>)[]> {
-    private BaseToolRegistry:ToolRegistry<Tool<any>[]> | undefined
+export class CombinedToolRegistry<T extends readonly (Tool | Zodios<any>)[]> {
+    private BaseToolRegistry:ToolRegistry<Tool[]> | undefined
     private ZodiosToolRegistry:ZodiosToolRegistry<Zodios<any>> | undefined
     private tools:DynamicStructuredTool[]
 

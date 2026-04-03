@@ -1,5 +1,4 @@
 import { BaseChatModel, BaseOutputParser, ChatGroq, ChatOllama, ChatOpenAI, ChatPromptTemplate, StringOutputParser, StructuredOutputParser } from "./imports";
-import { TavilySearch } from "./heart/tools/Tavily";
 import { z } from "zod/v3";
 
 export type Prettify<T> = {
@@ -32,21 +31,21 @@ export async function *stream(text:string | Array<any>,wait_in_between:number =
 }
 
 type LLMConfig = 
-  | { type: "groq"; model?: string; apikey: string }
-  | { type: "openrouter"; model?: string; apikey: string }
+  | { type: "groq"; model?: string; apikey?: string }
+  | { type: "openrouter"; model?: string; apikey?: string }
   | { type: "localOllama"; model?: string }
 
 export function getLLM(config: LLMConfig) {
   switch (config.type) {
     case "groq":
       return new ChatGroq({
-        apiKey: config.apikey,
+        apiKey: config.apikey ?? process.env.CHATGROQ_API_KEY,
         model: config.model ?? "llama-3.3-70b-versatile"
       });
 
     case "openrouter":
       return new ChatOpenAI({
-        apiKey: config.apikey,
+        apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
         configuration: {
             baseURL: "https://openrouter.ai/api/v1",
         },

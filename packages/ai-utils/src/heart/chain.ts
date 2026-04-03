@@ -8,61 +8,71 @@ import {
     createRetrievalChain, 
     createStuffDocumentsChain,
 } from "../imports"
-import { turn_to_docs } from "../rag"
+import { turn_to_docs, baseSplitter } from "../rag"
 import { z } from "zod/v3"
 
-export const DEFAULT_SCHEMA = z.object({ 
+/** Output-Schema für .invoke(): z.object() oder z.record() (Zod v3). */
+export type OutputSchema = z.ZodObject<any, any, any> | z.ZodRecord<any, any>
+
+export const DEFAULT_OUTPUT_SCHEMA = z.object({ 
     output: z.string().describe("Dein Output zur anfrage des Users") 
 })
 
-interface ChainProps<T extends z.ZodObject<any,any>>{
+interface ChainProps<T extends OutputSchema>{
     prompt?:string | Array<string | MessagesPlaceholder<any>>
     llm?:BaseChatModel
-    schema?:T
+    output?:T,
+    vectorStore?: VectorStore 
 }
 
 /**
  * CONSTRUCTOR:
- * @example constructor({
+ * @example 
+ * constructor({
         prompt = "du bist ein hilfreicher Assistent",
         llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
-        schema = DEFAULT_SCHEMA as unknown as T as T
+        output = DEFAULT_OUTPUT_SCHEMA as unknown as T as T
+        vectorStore = undefined
     }:ChainProps<T>){
         this.prompt = typeof prompt === "string" ? [["system", prompt]] : Array.isArray(prompt) ? prompt.map((p:string | MessagesPlaceholder<any>)=>{
             if(typeof p === "string"){
                 return ["system", p]
             } else {
-                return p
+                return p // weil wenn es kein string ist dann ist es ein MessagePlaceholder
             }
         }) : []
         this.llm = llm
-        this.schema = schema
-        this.parser = StructuredOutputParser.fromZodSchema(this.schema)
+        this.vectorStore = vectorStore
+        this.output = output
+        this.parser = StructuredOutputParser.fromZodSchema(this.output)
     }
+ * @param output - Zod-Schema: beschreibt die Struktur des Rückgabewerts von .invoke()
  */
-export class Chain<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> {
+export class Chain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> {
     private prompt:Array<["human" | "system", string] | MessagesPlaceholder<any>>
     private vectorStore: VectorStore | undefined
     private times_of_added_context: number = 0
     private parser:StructuredOutputParser<T>
     private llm:BaseChatModel
-    private schema:T
+    private output:T
 
     constructor({
         prompt = "du bist ein hilfreicher Assistent",
-        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
-        schema = DEFAULT_SCHEMA as unknown as T as T
-    }:ChainProps<T>){
+        llm = getLLM({ type:"groq" }),
+        output = DEFAULT_OUTPUT_SCHEMA as unknown as T as T,
+        vectorStore = undefined
+    }:ChainProps<T> = {}){
         this.prompt = typeof prompt === "string" ? [["system", prompt]] : Array.isArray(prompt) ? prompt.map((p:string | MessagesPlaceholder<any>)=>{
             if(typeof p === "string"){
                 return ["system", p]
             } else {
-                return p
+                return p // weil wenn es kein string ist dann ist es ein MessagePlaceholder, sonst ist jeder string prompt ein system prompt, humanprompts geben nur wir
             }
         }) : []
+        this.vectorStore = vectorStore
         this.llm = llm
-        this.schema = schema
-        this.parser = StructuredOutputParser.fromZodSchema(this.schema)
+        this.output = output
+        this.parser = StructuredOutputParser.fromZodSchema(this.output)
     }
 
     public async invoke(input:Record<string,any> & {debug?: boolean}):Promise<z.infer<T>>{
@@ -98,13 +108,13 @@ export class Chain<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> {
             })
             if (input.debug) console.log("created retrieval chain")
             const respo = await chain.invoke({input: JSON.stringify(input), ...invokeInput})
-            return this.schema.parse(respo.answer)
+            return this.output.parse(respo.answer)
         }
         
         const chain = true_prompt.pipe(this.llm).pipe(this.parser)
         if (input.debug) console.log("created normal chain")
         const respo = await chain.invoke(invokeInput)
-        return this.schema.parse(respo) 
+        return this.output.parse(respo) 
     }
 
 
@@ -129,7 +139,7 @@ export class Chain<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> {
         const invokeInput = {...input}
         
         if(this.vectorStore){
-            const retriever = this.vectorStore.asRetriever()
+            const retriever = this.vectorStore.asRetriever({ k:4 })
             if(input.debug) console.log("created retrieval chain (streaming)")
             
             // Für RAG: Hole Context und stream dann die LLM-Antwort
@@ -170,11 +180,12 @@ export class Chain<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> {
         }
         this.times_of_added_context++
         const docs = turn_to_docs(data)
-        await this.vectorStore.addDocuments(docs)
+        const splitted = await baseSplitter.splitDocuments(docs)
+        await this.vectorStore.addDocuments(splitted)
         console.log(`Added context ${this.times_of_added_context} ${this.times_of_added_context === 1 ? "time" : "times"}`)
     }
 
-    public async setContext(vectorStore: VectorStore){
+    public setContext(vectorStore: VectorStore){
         console.log("Setting context")
         this.vectorStore = vectorStore
     }
@@ -185,3 +196,4 @@ export class Chain<T extends z.ZodObject<any,any> = typeof DEFAULT_SCHEMA> {
         console.log("Context cleared")
     }
 }
+

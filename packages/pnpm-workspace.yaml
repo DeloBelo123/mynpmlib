@@ -1,6 +1,7 @@
 packages:
   - 'ai-utils'
   - 'base-utils'
+  - 'crm-utils'
   - 'react-utils'
   - 'stripe-utils'
   - 'supabase-utils'

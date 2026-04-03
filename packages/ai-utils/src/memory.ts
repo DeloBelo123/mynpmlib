@@ -1,5 +1,5 @@
 import { SupabaseTable } from "@delofarag/supabase-utils"
-import { createSimpleChain } from "./helpers"
+import { createSimpleChain, getLLM } from "./helpers"
 import {
     BaseCheckpointSaver,
     BaseMessage,
@@ -124,17 +124,18 @@ export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
 interface SmartCheckpointSaverOptions {
     messagesBeforeSummary?: number
     maxSummaries?: number
-    llm: BaseChatModel
+    llm?: BaseChatModel
     debug?: boolean
 }
 /**
- * @example CONSTRUCTOR:
+ * CONSTRUCTOR:
+ * @example
  * constructor(
         checkpointSaver: BaseCheckpointSaver,
         {
             messagesBeforeSummary = 12,
             maxSummaries = 7,
-            llm = getLLM("groq"),
+            llm = getLLM({ type:"groq" }),
             debug = false
         }: SmartCheckpointSaverOptions = {}
     ) {
@@ -157,7 +158,7 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
         checkpointSaver: BaseCheckpointSaver,{
             messagesBeforeSummary = 12,
             maxSummaries = 7,
-            llm,
+            llm = getLLM({ type:"groq" }),
             debug = false
         }: SmartCheckpointSaverOptions
     ) {

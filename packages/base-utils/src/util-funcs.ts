@@ -5,7 +5,7 @@ export function *enumerate<T>(arr: Iterable<T>,starting_index:number = 0) {
     }
 }
 
-export function* zip<T extends readonly Iterable<any>[]>(
+export function* zip<const T extends readonly Iterable<any>[]>(
     ...iterables: T
   ): Generator<
     { [K in keyof T]: T[K] extends Iterable<infer U> ? U : never }

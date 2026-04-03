@@ -1,33 +1,45 @@
 import { z } from "zod/v3"
+import type { OutputSchema } from "./chain"
 import { DynamicStructuredTool} from "../imports"
 import { BaseChatModel } from "../imports"
 import { BaseCheckpointSaver } from "../imports"
 import { VectorStore } from "../imports"
-import { turn_to_docs } from "../rag"
+import { turn_to_docs, baseSplitter } from "../rag"
 import { createReactAgent } from "../imports"
 import { HumanMessage} from "../imports"
 import { getLLM, stream } from "../helpers"
 import { structure } from "../magic-funcs/parsers/structure"
 
-interface AgentProps<T extends z.ZodObject<any,any>>{
-    prompt?: string | Array<string>
+/*
+    KOMPLETTER REWRITTE: lösch die ganze rag scheisse beim init und behandle die wie normale tools du pic, erstell einfach eine
+    "createRAGTool" func oder so ein scheiss und gib den einfach beim init ein. mach sogar die "setContext()" func weg, wenn man 
+    rag eingeben will dann soll man die "addTool()" func aufrufen mit dem RAGTool amk. entfern alles "...Context()" relatete!
+*/
+
+interface AgentProps<T extends OutputSchema>{
     tools: DynamicStructuredTool[]
-    llm: BaseChatModel
-    schema?: T
+    prompt?: string | Array<string>
+    llm?: BaseChatModel
+    output?: T
     memory?: BaseCheckpointSaver
 }
 
 /**
  * CONSTRUCTOR:
- * @example constructor({
+ * @example 
+ * constructor({
         prompt = `Du bist ein hilfreicher Assistent.`,
-        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+        llm = getLLM({ type:"groq" }),
         tools,
-        schema,
-        memory
+        output,
+        memory,
     }: AgentProps<T>) {
         this.prompt = typeof prompt === "string" ? [["system", prompt]] : Array.isArray(prompt) ? prompt.map((p:string)=>{
-            return ["system", p]
+            if(typeof p === "string"){
+                return ["system", p]
+            } else {
+                return p // weil wenn es kein string ist muss es ein MessagePlaceholder sein
+            }
         }) : []
         this.prompt.push(["system",`WICHTIG: 
             - Nutze Tools NUR wenn nötig
@@ -36,31 +48,33 @@ interface AgentProps<T extends z.ZodObject<any,any>>{
             - Vermeide unnötige Tool-Calls, die dem user nichts bringen`])
         this.tools = tools
         this.llm = llm
-        this.schema = schema
+        this.output = output
         this.memory = memory
     }
+ * @param output - Zod-Schema: beschreibt die Struktur des Rückgabewerts von .invoke()
  */
-export class Agent<T extends z.ZodObject<any,any>> {
+export class Agent<T extends OutputSchema> {
     private prompt: Array<["system", string]>
     private tools: DynamicStructuredTool[]
     private llm: BaseChatModel
-    private schema: T | undefined
+    private output: T | undefined
     private agent: any
     private memory: BaseCheckpointSaver | undefined
-    private vectorStore: VectorStore | undefined
-    private rag_tool: DynamicStructuredTool | undefined
-    private times_of_added_context: number = 0
-    private should_use_schema: boolean = true
+    private should_use_output: boolean = true
 
     constructor({
         prompt = `Du bist ein hilfreicher Assistent.`,
-        llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+        llm = getLLM({ type:"groq" }),
         tools,
-        schema,
-        memory
+        output,
+        memory,
     }: AgentProps<T>) {
         this.prompt = typeof prompt === "string" ? [["system", prompt]] : Array.isArray(prompt) ? prompt.map((p:string)=>{
-            return ["system", p]
+            if(typeof p === "string"){
+                return ["system", p]
+            } else {
+                return p // weil wenn es kein string ist muss es ein MessagePlaceholder sein
+            }
         }) : []
         this.prompt.push(["system",`WICHTIG: 
             - Nutze Tools NUR wenn nötig
@@ -69,7 +83,7 @@ export class Agent<T extends z.ZodObject<any,any>> {
             - Vermeide unnötige Tool-Calls, die dem user nichts bringen`])
         this.tools = tools
         this.llm = llm
-        this.schema = schema
+        this.output = output
         this.memory = memory
     }
 
@@ -83,14 +97,10 @@ export class Agent<T extends z.ZodObject<any,any>> {
             ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
         );
 
-        // Tools für diesen invoke (inkl. RAG falls vorhanden)
-        const activeTools = this.rag_tool 
-            ? [...this.tools, this.rag_tool] 
-            : this.tools
 
         this.agent = createReactAgent({
             llm: this.llm as any,
-            tools: activeTools as any,
+            tools: this.tools as any,
             checkpointSaver: this.memory as any,
             prompt: (state) => [
                 ...this.prompt,  
@@ -99,21 +109,25 @@ export class Agent<T extends z.ZodObject<any,any>> {
         })
         
         const config = thread_id && this.memory ? { configurable: { thread_id } } : undefined
+        if(thread_id && !this.memory) console.warn("thread_id wurde beim invoke des agenten mitgegeben aber keine memory, somit wird nichts gespeichert und die thread_id ist gleichgültig")
         const result = await this.agent.invoke({ messages: humanMessages } as any, config)
         if(debug) return result
         const lastMessage = result.messages[result.messages.length - 1]
-        const content = lastMessage.content
+        const raw = lastMessage?.content
+        const content = typeof raw === "string" ? raw : (Array.isArray(raw) ? raw.map((c: any) => c?.text ?? c).join("") : String(raw ?? ""))
 
-        if (this.schema && this.should_use_schema) {
-            return await structure({ data: content, into: this.schema, llm: this.llm }) as any
+        if (this.output && this.should_use_output) {
+            return await structure({ data: content, into: this.output, llm: this.llm }) as any
+        } else {
+            return content as any
         }
-        return content 
     }
 
+    /** bro nutzt später vielleicht intern mal die native .stream() von createReactAgent */
     public async *stream(invokeInput: Record<string, any> & { thread_id?: string, debug?: boolean, stream_delay?: number }): AsyncGenerator<string, void, unknown> {
-        this.should_use_schema = false
+        this.should_use_output = false
         try{
-            const { stream_delay = 1, ...rest } = invokeInput
+            const { stream_delay = 50, ...rest } = invokeInput
             const response = await this.invoke(rest)
             const responseStr = typeof response === "string" ? response : JSON.stringify(response)
             const words = responseStr.split(" ")
@@ -121,45 +135,8 @@ export class Agent<T extends z.ZodObject<any,any>> {
                 yield word + " "
             }
         } finally {
-            this.should_use_schema = true
+            this.should_use_output = true
         }
-    }
-
-    public setContext(vectorStore: VectorStore, metadata: { name?: string, description?: string } = {}) {
-        this.vectorStore = vectorStore
-        this.rag_tool = new DynamicStructuredTool({
-            name: metadata.name ?? "search_context",
-            description: metadata.description ?? "Search the knowledge base for relevant information",
-            schema: z.object({
-                query: z.string().describe("The search query")
-            }),
-            func: async ({ query }) => {
-                const docs = await this.vectorStore?.similaritySearch(query, 3)
-                if (!docs || docs.length === 0) return "No relevant information found."
-                return docs.map(doc => doc.pageContent).join("\n\n---\n\n")
-            }
-        })
-    }
-
-    public async addContext(data: Array<any>){
-        if(!this.vectorStore) {
-            throw new Error("Cant add context, no vector store set")
-        }
-        this.times_of_added_context++
-        const docs = turn_to_docs(data)
-        await this.vectorStore.addDocuments(docs)
-        console.log(`Added context ${this.times_of_added_context} ${this.times_of_added_context === 1 ? "time" : "times"}`)
-    }
-
-    public clearContext(){
-        this.rag_tool = undefined
-        this.vectorStore = undefined
-        this.times_of_added_context = 0
-        console.log("Context cleared")
-    }
-
-    public hasContext(): boolean {
-        return this.vectorStore !== undefined && this.rag_tool !== undefined
     }
 
     public addTool(tool:DynamicStructuredTool){
@@ -167,11 +144,7 @@ export class Agent<T extends z.ZodObject<any,any>> {
     }
 
     public get currentTools(): string[] {
-        const tools = [...this.tools]
-        if (this.rag_tool) {
-            tools.push(this.rag_tool)
-        }
-        return tools.map(tool => tool.name)
+        return this.tools.map(tool => tool.name)
     }
 }
 

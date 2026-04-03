@@ -1,9 +1,10 @@
 import { createSimpleChain, getLLM } from "../../helpers"
 import { BaseChatModel, StructuredOutputParser } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
+import type { OutputSchema } from "../../heart/chain"
 import { z } from "zod/v3"
 
-export async function structure<T extends z.ZodObject<any, any>>({
+export async function structure<T extends OutputSchema>({
     data,
     into,
     llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),

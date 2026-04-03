@@ -1,18 +1,15 @@
 import { DynamicStructuredTool } from "@langchain/core/tools"
-import type { ExtractToolNames } from "./CombinedRegistry"
+import type { ExtractToolNames } from "./zodios/CombinedRegistry"
 import { z } from "zod/v3"
 
-export interface Tool<T extends z.ZodObject<any,any>> {
+export interface Tool {
     name:string
     description:string
-    schema:T
-    func:(input:z.infer<T>) => any
+    schema:z.ZodObject<any,any>
+    func:(input: any) => any
 }
 
-/**
- * vergiss nicht 'as const' am ende des input-arrays zu verwenden für perekten autocomplete!!!
- */
-export class ToolRegistry<T extends readonly Tool<z.ZodObject<any,any>>[]> {
+export class ToolRegistry<const T extends Tool[]> {
     private tools:DynamicStructuredTool[]
     constructor(tools:T){
         this.tools = tools.map(tool => tool instanceof DynamicStructuredTool ? tool : this.turnToTool(tool)) 
@@ -37,7 +34,7 @@ export class ToolRegistry<T extends readonly Tool<z.ZodObject<any,any>>[]> {
         return names.map(name => this.getTool(name))
     }
 
-    private turnToTool<U extends z.ZodObject<any,any>>(tool:Tool<U>):DynamicStructuredTool{
+    private turnToTool(tool:Tool):DynamicStructuredTool{
         return new DynamicStructuredTool({
             name:tool.name,
             description:tool.description,
@@ -59,6 +56,25 @@ export class ToolRegistry<T extends readonly Tool<z.ZodObject<any,any>>[]> {
     }
 }
 
+const t = new ToolRegistry([
+    {
+        name:"get_weather",
+        description:"get the weather of a city",
+        schema:z.object({
+            city:z.string()
+        }),
+        func:async({city}:{city:string})=>{
+            return `the weather of ${city} is sunny`
+        }
+    },
+    {
+        name:"get_time",
+        description:"get the time",
+        schema:z.object({}),
+        func:async()=>{
+            return `the time is ${new Date().toLocaleTimeString()}`
+        }
+    }
+])
 
-
-
+t.getTool("get_weather")
