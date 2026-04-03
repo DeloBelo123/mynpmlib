@@ -13,3 +13,17 @@ dist/
 build/
 **/build/
 *.tsbuildinfo
+
+#tests
+tests/
+**/tests/
+test/
+**/test/
+test.ts
+**/test.ts
+test.js
+**/test.js
+test.jsx
+**/test.jsx
+test.tsx
+**/test.tsx
