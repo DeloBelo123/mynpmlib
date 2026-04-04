@@ -40,10 +40,10 @@ export class HubspotConnection extends CrmConnection {
 
         if (args.supabase_id){
             const tokenStore: TokenStore = {
-                state,
-                provider: this.provider,
+                crm_state: state,
+                crm_provider: this.provider,
                 id: args.supabase_id,
-                token_last_refreshed_at: new Date(),
+                crm_token_last_refreshed_at: new Date(),
             }
             return { authorizeUrl, tokenStore, state }
         }
@@ -89,13 +89,13 @@ export class HubspotConnection extends CrmConnection {
 
         if (args.supabase_id){
             const tokenStore: TokenStore = {
-                provider: this.provider,
+                crm_provider: this.provider,
                 id: args.supabase_id,
-                access_token: raw.access_token,
-                refresh_token: raw.refresh_token ?? null,
-                token_expires_at,
-                token_last_refreshed_at: new Date(),
-                provider_account_id: portalId != null ? String(portalId) : undefined,
+                crm_access_token: raw.access_token,
+                crm_refresh_token: raw.refresh_token ?? null,
+                crm_token_expires_at: token_expires_at,
+                crm_token_last_refreshed_at: new Date(),
+                crm_provider_account_id: portalId != null ? String(portalId) : undefined,
             }
             return { raw, tokenStore, portalId }
         }
@@ -127,11 +127,11 @@ export class HubspotConnection extends CrmConnection {
         const raw = parsedRaw.data
         const token_expires_at = toExpiresAt(raw.expires_in)
         const tokenStore: TokenStore = {
-            provider: this.provider,
-            access_token: raw.access_token,
-            refresh_token: raw.refresh_token ?? args.refreshToken,
-            token_expires_at,
-            token_last_refreshed_at: new Date(),
+            crm_provider: this.provider,
+            crm_access_token: raw.access_token,
+            crm_refresh_token: raw.refresh_token ?? args.refreshToken,
+            crm_token_expires_at: token_expires_at,
+            crm_token_last_refreshed_at: new Date(),
         }
         return { raw, tokenStore }
     }
@@ -182,10 +182,10 @@ export class HubspotConnection extends CrmConnection {
         const { tokenStore } = await this.refreshAccessToken(clientSecret, {
             refreshToken: args.refreshToken,
         })
-        if (!tokenStore.access_token) {
+        if (!tokenStore.crm_access_token) {
             throw new Error("HubSpot refresh returned no access_token")
         }
-        return tokenStore.access_token
+        return tokenStore.crm_access_token
     }
 }
 
