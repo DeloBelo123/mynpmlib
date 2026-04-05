@@ -43,7 +43,7 @@ export class HubspotConnection extends CrmConnection {
                 crm_state: state,
                 crm_provider: this.provider,
                 id: args.supabase_id,
-                crm_token_last_refreshed_at: new Date(),
+                crm_access_token_last_refreshed_at: new Date(),
             }
             return { authorizeUrl, tokenStore, state }
         }
@@ -93,9 +93,9 @@ export class HubspotConnection extends CrmConnection {
                 id: args.supabase_id,
                 crm_access_token: raw.access_token,
                 crm_refresh_token: raw.refresh_token ?? null,
-                crm_token_expires_at: token_expires_at,
-                crm_token_last_refreshed_at: new Date(),
-                crm_provider_account_id: portalId != null ? String(portalId) : undefined,
+                crm_access_token_expires_at: token_expires_at,
+                crm_access_token_last_refreshed_at: new Date(),
+                crm_account_id: portalId != null ? String(portalId) : undefined,
             }
             return { raw, tokenStore, portalId }
         }
@@ -130,8 +130,8 @@ export class HubspotConnection extends CrmConnection {
             crm_provider: this.provider,
             crm_access_token: raw.access_token,
             crm_refresh_token: raw.refresh_token ?? args.refreshToken,
-            crm_token_expires_at: token_expires_at,
-            crm_token_last_refreshed_at: new Date(),
+            crm_access_token_expires_at: token_expires_at,
+            crm_access_token_last_refreshed_at: new Date(),
         }
         return { raw, tokenStore }
     }

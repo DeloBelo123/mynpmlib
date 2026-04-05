@@ -1,5 +1,5 @@
-import { Hubspot } from "./crms/hubspot/hubspot"
-import type { HubspotInit } from "./crms/hubspot/types"
+import { Hubspot } from "./hubspot/hubspot"
+import type { HubspotInit } from "./hubspot/types"
 
 export const CRMs = ["hubspot"] as const
 export type CRMName = (typeof CRMs)[number]
@@ -17,7 +17,7 @@ export type CRMArgPairs = {
 }[keyof CRMInitMap]
 
 /**
- * 
+ * Liefert eine konkrete CRM-Instanz passend zu `name` und `init`.
  */
 export function getCRM<N extends CRMName>(name: N, init: CRMInitMap[N]): CRMInstanceMap[N] {
 	const crm: CRMName = name
@@ -28,6 +28,14 @@ export function getCRM<N extends CRMName>(name: N, init: CRMInitMap[N]): CRMInst
 			crm satisfies never
 			throw new Error(`Unknown CRM: ${String(crm)}`)
 	}
+}
+
+/**
+ * Gibt die Liste der registrierten CRM-Identifikatoren zurück (gleiches Array wie `CRMs`).
+ * Nützlich für UI (Auswahl), Feature-Flags oder Validierung.
+ */
+export function listCRMs() {
+	return CRMs
 }
 
 

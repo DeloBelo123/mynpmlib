@@ -1,5 +1,7 @@
+import type CrmConnection from "./CrmConnection"
 export default abstract class CRM {
 	abstract readonly provider: string
+	abstract readonly connection: CrmConnection
 
 	abstract getContacts(options: {
 		accessToken: string
