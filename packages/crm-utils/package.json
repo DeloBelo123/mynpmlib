@@ -1,6 +1,6 @@
 {
     "name": "@delofarag/crm-utils",
-    "version": "0.2.3",
+    "version": "1.0.0",
     "type": "module",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -14,9 +14,7 @@
     "scripts": {
         "build": "tsc"
     },
-    "dependencies": {
-        "zod": "^3.25.76"
-    },
+    "dependencies": {},
     "devDependencies": {
         "@types/node": "^20.0.0",
         "typescript": "^5.0.0"

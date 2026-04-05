@@ -5,17 +5,14 @@ export default function Main() {
         <div className="mx-auto max-w-lg space-y-4 p-6">
             <h1 className="text-xl font-semibold">crm-utils — HubSpot smoke test</h1>
             <p className="text-sm text-neutral-600">
-                HubSpot-App anlegen, Redirect-URL{" "}
-                <code className="rounded bg-neutral-100 px-1">
-                    …/api/hubspot/callback
-                </code>
-                , dann <code className="rounded bg-neutral-100 px-1">.env.local</code>{" "}
-                setzen.
+                <code className="rounded bg-neutral-100 px-1">HUBSPOT_ACCESS_TOKEN</code> in{" "}
+                <code className="rounded bg-neutral-100 px-1">.env.local</code> setzen (Token
+                beschaffst du in HubSpot — crm-utils enthält kein OAuth mehr).
             </p>
             <p className="text-sm text-neutral-600">
-                Button startet OAuth. Danach siehst du Portal-ID und eine kleine Kontakt-Vorschau
-                unter <code className="rounded bg-neutral-100 px-1">/hubspot/connected</code>{" "}
-                (Demo-Daten im Cookie, ohne Access-Token).
+                Button ruft <code className="rounded bg-neutral-100 px-1">getCRM(&quot;hubspot&quot;, {})</code>{" "}
+                und <code className="rounded bg-neutral-100 px-1">getContacts</code> auf und gibt JSON
+                zurück.
             </p>
             <HubspotConnectButton />
         </div>
