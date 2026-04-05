@@ -9,34 +9,34 @@ WICHTIG: NUR EINS SOLCH EINER TABELLE IM PROJEKT HABEN (wenn du diesen code mehr
 ````sql
 
 -- 1) Eigene User-Tabelle anlegen
-create table if not exists public.{{TABLENAME}} (
+create table if not exists public.{{TABLENAME}} ( --{{TABLE NAME}} NICHT VERGESSEN 
   id uuid primary key references auth.users(id) on delete cascade,
   created_at timestamptz not null default now()
 );
 
 -- 2) RLS aktivieren
-alter table public.{{TABLENAME}} enable row level security;
+alter table public.{{TABLENAME}} enable row level security; --{{TABLE NAME}} NICHT VERGESSEN 
 
 -- 3) Policies
-drop policy if exists "Users can view their own {{TABLENAME}}" on public.{{TABLENAME}};
-drop policy if exists "Users can update their own {{TABLENAME}}" on public.{{TABLENAME}};
-drop policy if exists "Users can delete their own {{TABLENAME}}" on public.{{TABLENAME}};
+drop policy if exists "Users can view their own {{TABLENAME}}" on public.{{TABLENAME}}; --{{TABLE NAME}} NICHT VERGESSEN 
+drop policy if exists "Users can update their own {{TABLENAME}}" on public.{{TABLENAME}}; --{{TABLE NAME}} NICHT VERGESSEN 
+drop policy if exists "Users can delete their own {{TABLENAME}}" on public.{{TABLENAME}}; --{{TABLE NAME}} NICHT VERGESSEN 
 
-create policy "Users can view their own {{TABLENAME}}"
-on public.{{TABLENAME}}
+create policy "Users can view their own {{TABLENAME}}" --{{TABLE NAME}} NICHT VERGESSEN 
+on public.{{TABLENAME}} --{{TABLE NAME}} NICHT VERGESSEN 
 for select
 to authenticated
 using (auth.uid() = id);
 
-create policy "Users can update their own {{TABLENAME}}"
-on public.{{TABLENAME}}
+create policy "Users can update their own {{TABLENAME}}" --{{TABLE NAME}} NICHT VERGESSEN 
+on public.{{TABLENAME}} --{{TABLE NAME}} NICHT VERGESSEN 
 for update
 to authenticated
 using (auth.uid() = id)
 with check (auth.uid() = id);
 
-create policy "Users can delete their own {{TABLENAME}}"
-on public.{{TABLENAME}}
+create policy "Users can delete their own {{TABLENAME}}" --{{TABLE NAME}} NICHT VERGESSEN 
+on public.{{TABLENAME}} --{{TABLE NAME}} NICHT VERGESSEN 
 for delete
 to authenticated
 using (auth.uid() = id);
@@ -49,7 +49,7 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.{{TABLENAME}} (id)
+  insert into public.{{TABLENAME}} (id) --{{TABLE NAME}} NICHT VERGESSEN 
   values (new.id)
   on conflict (id) do nothing;
 
