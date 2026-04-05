@@ -1,14 +1,15 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * @example CONSTRUCTOR:
- * public tableName:string
+ * CONSTRUCTOR:
+ * @example 
+ *  public tableName:string
     public structure?:T
     private supabase: SupabaseClient
-    
-    constructor(tableName:string, supabase?: SupabaseClient){
+
+    constructor(tableName:string, { url = process.env.NEXT_PUBLIC_SUPABASE_URL!, key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! }:{ url?:string, key?:string } = {}){
         this.tableName = tableName
-        this.supabase = supabase ?? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!) // wichtig für sicherheit, nur anon-key damit RLS immer da ist!
+        this.supabase = createClient(url, key) // per default immer anon-key, wenn du sercret-key will überschreib einfach key-prop
     }
  */
 export class SupabaseTable<T extends Record<string,any>> {
@@ -16,9 +17,9 @@ export class SupabaseTable<T extends Record<string,any>> {
     public structure?:T
     private supabase: SupabaseClient
     
-    constructor(tableName:string, supabase?: SupabaseClient){
+    constructor(tableName:string, { url = process.env.NEXT_PUBLIC_SUPABASE_URL!, key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! }:{ url?:string, key?:string } = {}){
         this.tableName = tableName
-        this.supabase = supabase ?? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+        this.supabase = createClient(url, key)
     }
     /**
      * @param rows - die neuen Zeilen die du in die Tabelle einfügen möchtest, als Array von Objekten, wo jedes Objekt eine Zeile ist
