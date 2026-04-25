@@ -154,6 +154,7 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
     private maxSummaries: number
     private llm: BaseChatModel
     private debug: boolean
+    private lastDebugState: string | undefined
 
     constructor(
         checkpointSaver: BaseCheckpointSaver,{
@@ -161,7 +162,7 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
             maxSummaries = 7,
             llm = getLLM({ type:"groq" }),
             debug = false
-        }: SmartCheckpointSaverOptions
+        }: SmartCheckpointSaverOptions = {}
     ) {
         super()
         this.checkpointSaver = checkpointSaver
@@ -171,24 +172,52 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
         this.debug = debug
     }
     
+    private getMessageRole(message: BaseMessage): "human" | "ai" | "system" | "other" {
+        if (message instanceof HumanMessage) return "human"
+        if (message instanceof AIMessage) return "ai"
+        if (message instanceof SystemMessage) return "system"
+
+        const rawMessage = message as any
+        const type = typeof rawMessage._getType === "function" ? rawMessage._getType() : rawMessage._getType
+        if (type === "human" || type === "user") return "human"
+        if (type === "ai" || type === "assistant") return "ai"
+        if (type === "system") return "system"
+
+        const id = rawMessage.id?.[rawMessage.id.length - 1]
+        if (id === "HumanMessage") return "human"
+        if (id === "AIMessage" || id === "AIMessageChunk") return "ai"
+        if (id === "SystemMessage") return "system"
+
+        const role = rawMessage.role ?? rawMessage.kwargs?.role
+        if (role === "human" || role === "user") return "human"
+        if (role === "ai" || role === "assistant") return "ai"
+        if (role === "system") return "system"
+
+        return "other"
+    }
+
+    private getMessageContent(message: BaseMessage): string {
+        const rawContent = (message as any).content ?? (message as any).kwargs?.content ?? ""
+        return typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent)
+    }
+
     /**
      * Zählt User/AI Messages (ignoriert System-Messages)
      */
     private countChatMessages(messages: BaseMessage[]): number {
-        return messages.filter(msg => 
-            msg instanceof HumanMessage || msg instanceof AIMessage
-        ).length
+        return messages.filter(msg => {
+            const role = this.getMessageRole(msg)
+            return role === "human" || role === "ai"
+        }).length
     }
     
     /**
      * Findet alle System-Messages die Zusammenfassungen sind
      */
-    private findSummaryMessages(messages: BaseMessage[]): Array<{ index: number, message: SystemMessage }> {
-        const summaries: Array<{ index: number, message: SystemMessage }> = []
+    private findSummaryMessages(messages: BaseMessage[]): Array<{ index: number, message: BaseMessage }> {
+        const summaries: Array<{ index: number, message: BaseMessage }> = []
         messages.forEach((msg, index) => {
-            if (msg instanceof SystemMessage && 
-                typeof msg.content === 'string' && 
-                msg.content.includes('Zusammenfassung')) {
+            if (this.getMessageRole(msg) === "system" && this.getMessageContent(msg).includes("Zusammenfassung")) {
                 summaries.push({ index, message: msg })
             }
         })
@@ -200,13 +229,9 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
      */
     private messagesToText(messages: BaseMessage[]): string {
         return messages.map(msg => {
-            const role = msg instanceof HumanMessage ? 'User' 
-                : msg instanceof AIMessage ? 'Assistant' 
-                : 'System'
-            const content = typeof msg.content === 'string' 
-                ? msg.content 
-                : JSON.stringify(msg.content)
-            return `${role}: ${content}`
+            const role = this.getMessageRole(msg)
+            const label = role === "human" ? "User" : role === "ai" ? "Assistant" : "System"
+            return `${label}: ${this.getMessageContent(msg)}`
         }).join('\n\n')
     }
     
@@ -231,12 +256,28 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
         
         // Finde die Messages NACH der letzten Zusammenfassung
         const messagesAfterLastSummary = messages.slice(lastSummaryIndex + 1)
+        const chatMessagesAfterLastSummary = messagesAfterLastSummary.filter(msg => {
+            const role = this.getMessageRole(msg)
+            return role === "human" || role === "ai"
+        })
+        const lastChatMessageRole = chatMessagesAfterLastSummary.length > 0
+            ? this.getMessageRole(chatMessagesAfterLastSummary[chatMessagesAfterLastSummary.length - 1])
+            : "other"
         
         // Zähle nur User/AI Messages NACH der letzten Zusammenfassung
-        const chatMessageCount = this.countChatMessages(messagesAfterLastSummary)
+        const chatMessageCount = chatMessagesAfterLastSummary.length
+        if (this.debug) {
+            const missingUntilNextSummary = Math.max(0, this.messagesBeforeSummary - chatMessageCount)
+            const debugState = `${summaryMessages.length}:${chatMessageCount}:${missingUntilNextSummary}:${lastChatMessageRole}`
+            if (debugState !== this.lastDebugState) {
+                console.log(`[SmartCheckpointSaver] Chat messages since last summary: ${chatMessageCount}`)
+                console.log(`[SmartCheckpointSaver] Messages until next summary: ${missingUntilNextSummary}`)
+                this.lastDebugState = debugState
+            }
+        }
         
         // Wenn noch nicht genug Messages nach der letzten Zusammenfassung, keine Summarization
-        if (chatMessageCount < this.messagesBeforeSummary) {
+        if (chatMessageCount < this.messagesBeforeSummary || lastChatMessageRole !== "ai") {
             return checkpoint
         }
         
@@ -248,7 +289,8 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
         // Gehe rückwärts durch Messages NACH der letzten Zusammenfassung
         for (let i = messagesAfterLastSummary.length - 1; i >= 0 && chatCount < this.messagesBeforeSummary; i--) {
             const msg = messagesAfterLastSummary[i]
-            if (msg instanceof HumanMessage || msg instanceof AIMessage) {
+            const role = this.getMessageRole(msg)
+            if (role === "human" || role === "ai") {
                 const originalIndex = lastSummaryIndex + 1 + i // Original-Index im messages Array
                 indicesToSummarize.unshift(originalIndex) // Am Anfang einfügen für korrekte Reihenfolge
                 messagesToSummarize.unshift(msg) // Am Anfang einfügen für korrekte Reihenfolge
@@ -297,8 +339,8 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
             newMessages = [...beforeSummary, summarySystemMessage, ...afterSummary]
         } else {
             // Keine Zusammenfassung vorhanden: Füge nach System-Messages ein
-            const systemMessages = remainingMessages.filter((msg: BaseMessage) => msg instanceof SystemMessage)
-            const nonSystemMessages = remainingMessages.filter((msg: BaseMessage) => !(msg instanceof SystemMessage))
+            const systemMessages = remainingMessages.filter((msg: BaseMessage) => this.getMessageRole(msg) === "system")
+            const nonSystemMessages = remainingMessages.filter((msg: BaseMessage) => this.getMessageRole(msg) !== "system")
             newMessages = [...systemMessages, summarySystemMessage, ...nonSystemMessages]
         }
         

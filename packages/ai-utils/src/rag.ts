@@ -3,6 +3,7 @@ import {
     OllamaEmbeddings, 
     RecursiveCharacterTextSplitter, 
     FaissStore, 
+    MemoryVectorStore,
     Document, 
     Embeddings,
     createStuffDocumentsChain,
@@ -35,6 +36,18 @@ export function turn_to_docs<T>(docs: T[]): Document<Record<string,any>>[] {
         pageContent: typeof doc === "string" ? doc : JSON.stringify(doc,null,2),
         metadata: {}
     }))
+}
+
+/** nur für demos */
+export async function createRAMVectoreStore(
+    data: string[],
+    {
+        embeddings = baseEmbeddings
+    }: { embeddings?: Embeddings } = {}
+) {
+    const docs = turn_to_docs(data)
+    const splitted_docs = await baseSplitter.splitDocuments(docs)
+    return await MemoryVectorStore.fromDocuments(splitted_docs, embeddings)
 }
 
 export async function createSupabaseVectoreStore(

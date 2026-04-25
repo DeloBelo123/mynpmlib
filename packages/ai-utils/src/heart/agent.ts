@@ -181,6 +181,14 @@ export class Agent<T extends OutputSchema | undefined = undefined> {
 
             for await (const chunk of nativeStream) {
                 const messageChunk = Array.isArray(chunk) ? chunk[0] : chunk
+                const metadata = Array.isArray(chunk) ? chunk[1] : undefined
+                const node = metadata?.langgraph_node
+                const messageType = typeof messageChunk?._getType === "function" ? messageChunk._getType() : messageChunk?._getType
+
+                if (node === "tools" || messageType === "tool") {
+                    continue
+                }
+
                 const raw = messageChunk?.content
                 if (typeof raw === "string") {
                     if (raw.length > 0) yield raw
