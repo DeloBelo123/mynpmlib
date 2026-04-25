@@ -21,7 +21,7 @@ Du kannst jederzeit ein eigenes LLM übergeben (z.B. anderes Modell, anderer Pro
 |-----|----------|
 | **Groq** | `getLLM({ type: "groq", apikey: process.env.CHATGROQ_API_KEY!, model: "llama-3.3-70b-versatile" })` |
 | **OpenRouter** | `getLLM({ type: "openrouter", apikey: process.env.OPENROUTER_API_KEY!, model: "openai/gpt-4o-mini" })` |
-| **Ollama (lokal)** | `getLLM({ type: "localOllama", model: "llama3.2:3b" })` |
+| **Ollama (lokal)** | `getLLM({ type: "local", model: "llama3.2:3b" })` |
 
 ---
 

@@ -35,81 +35,109 @@ export class SupabaseTable<T extends Record<string,any>> {
         return insertedData;
     }
 
-    // funcitonal overloading
     /**
      * @param columns - die spalten die du abfragen möchtest, standardmäßig ist es "*", also alle spalten,
      * @param where - die filter die du anwenden möchtest was ausgewählt werden soll, standardmäßig ist es ein leeres Array, also keine Filter
      * @param ordered_by - sortierung nach einer spalte (column: spaltenname, descending: true/false)
      * @param limited_to - begrenzt die anzahl der ergebnisse
-     * @param first - gibt nur die erste Zeile zurück wenn auf true gesetzt ist, als object, anstatt eines Arrays von Zeilen (standardmäßig ist es false)
-     * @returns returned ein array von Objekte, wo jedes Objekt eine Zeile der Tabelle ist, die den optionalen Filtern entspricht, wo die Keys die spaltennamen sind und die Values die Werte der Zeile
+     * @returns Array von Zeilen; leeres Array wenn keine Treffer (oder Supabase liefert null).
      */
-    async select<K extends keyof T>({columns , where, ordered_by, limited_to}:{
-        columns:Array<keyof T | "*">, 
-        where?:Array<{column:K,is:T[K] }>,
-        ordered_by?:{column:keyof T | (string & {}), descending:boolean},
-        limited_to?:number,
-        first?:false
-    }): Promise<Array<Record<keyof T,any>>>
-    async select<K extends keyof T>({columns , where, ordered_by, limited_to}:{
-        columns:Array<keyof T | "*">, 
-        where?:Array<{column:K,is:T[K] }>,
-        ordered_by?:{column:keyof T | (string & {}), descending:boolean},
-        limited_to?:number,
-        first:true
-    }): Promise<Record<keyof T,any> | null>
-    async select<K extends keyof T>({columns , where, ordered_by, limited_to, first = false}:{
-        columns:Array<keyof T | "*">, 
-        where?:Array<{column:K ,is:T[K] }>,
-        ordered_by?:{column:keyof T | (string & {}), descending:boolean},
-        limited_to?:number,
-        first?:boolean
-    }): Promise<Array<Record<keyof T,any>> | Record<any,any> | null>
-    {
-        let columnString = columns.join(",")
-        let query = this.supabase.from(this.tableName).select(columnString)
-        if (where){
-            for ( const {column,is} of where) {
-                query = query.eq(column as string,is)
+    async select<K extends keyof T>({
+        columns,
+        where,
+        ordered_by,
+        limited_to,
+    }: {
+        columns: Array<keyof T | "*">;
+        where?: Array<{ column: K; is: T[K] }>;
+        ordered_by?: { column: keyof T | (string & {}); descending: boolean };
+        limited_to?: number;
+    }): Promise<Array<Record<keyof T, any>>> {
+        let columnString = columns.join(",");
+        let query = this.supabase.from(this.tableName).select(columnString);
+        if (where) {
+            for (const { column, is } of where) {
+                query = query.eq(column as string, is);
             }
         }
-        if (ordered_by){
-            query = query.order(ordered_by.column as string, { ascending: !ordered_by.descending })
+        if (ordered_by) {
+            query = query.order(ordered_by.column as string, { ascending: !ordered_by.descending });
         }
-        if (limited_to){
-            query = query.limit(limited_to)
+        if (limited_to) {
+            query = query.limit(limited_to);
         }
-        const { data, error } = await query
+        const { data, error } = await query;
         if (error) {
             console.error("Error selecting data:", error);
             throw new Error(`Error selecting data from ${this.tableName}: ${error.message}`);
         }
-        if(first){
-            if(data && data.length > 0){
-                return data[0]
-            } else {
-                console.warn(`No data found in first mode in table: ${this.tableName}.select(${query})`)
-                return null
-            }
-            
-        }
-        return data
+        return (data ?? []) as Array<Record<keyof T, any>>;
     }
 
     /**
-     * @param updated - die spalten die du aktualisieren möchtest, als Objekt wo der key der Spaltenname ist und der value der neue Wert
-     * @param where - die Filter die genau sagen welche Zeile sich aktualisieren soll, sonst wird jede Zeile aktualisiert!!!
-     * @returns die geupdateten Zeilen, also die Zeilen die du aktualisiert hast
+     * @param update - Spalten ersetzen (bei JSON/JSONB: Wert = komplettes neues Objekt).
+     * @param mergeJson - Optional: nur für genau eine Trefferzeile (where). Deep-Merge in die DB-Werte dieser Spalten (JSONB-Teil-Updates). Wenn es kein objekt in diesem col gibt, wird einfach das zu mergende objekt wie beim 'update'-prop hinzugefügt. props die vorher nicht im objekt waren werden einfach dem objekt hinzugefügt
+     * @param where - Filter; bei mergeJson muss genau eine Zeile matchen.
      */
-    async update<K extends keyof T>({where,update}:{ where:Array<{column:K | (string & {}), is:T[K] }>, update:NestedUpdate<T> }){
-        // 1. Objekt flach machen (Dot-Notation für JSON-Properties)
-        const flatUpdate = this.flattenNested(update as Record<string, any>);
-        
-        let query = this.supabase.from(this.tableName).update(flatUpdate)
-        for ( const {column,is} of where){
-            query = query.eq(column as string,is)
+    async update<K extends keyof T>({
+        where,
+        update,
+        mergeJson,
+    }: {
+        where: Array<{ column: K | (string & {}); is: T[K] }>;
+        update?: Partial<T>;
+        mergeJson?: MergeJsonPatch<T>;
+    }) {
+        const mergeKeys = mergeJson
+            ? (Object.keys(mergeJson) as Array<keyof T>).filter((k) => mergeJson[k] !== undefined)
+            : [];
+
+        for (const k of mergeKeys) {
+            if (update?.[k] !== undefined) {
+                throw new Error(
+                    `Column "${String(k)}" cannot appear in both update and mergeJson; use only mergeJson for partial JSON or only update to replace.`,
+                );
+            }
         }
-        const { data, error } = await query
+
+        let payload: Record<string, any> = { ...update };
+
+        if (mergeKeys.length > 0) {
+            const rows = await this.select({
+                columns: mergeKeys as Array<keyof T | "*">,
+                where,
+                limited_to: 2,
+            });
+            if (!rows || rows.length === 0) {
+                throw new Error(
+                    `mergeJson: no row matched the where filter on ${this.tableName}; nothing to merge.`,
+                );
+            }
+            if (rows.length > 1) {
+                throw new Error(
+                    `mergeJson requires exactly one matching row; got ${rows.length}. Narrow your where filter or update rows in a loop.`,
+                );
+            }
+            const row = rows[0] as Record<string, any>;
+            for (const key of mergeKeys) {
+                const patch = mergeJson![key] as Record<string, any>;
+                const existing = row[key as string];
+                const base =
+                    existing !== null &&
+                    existing !== undefined &&
+                    typeof existing === "object" &&
+                    !Array.isArray(existing)
+                        ? existing
+                        : {};
+                payload[key as string] = this.deepMergeJson(base, patch);
+            }
+        }
+
+        let query = this.supabase.from(this.tableName).update(payload);
+        for (const { column, is } of where) {
+            query = query.eq(column as string, is);
+        }
+        const { data, error } = await query;
         if (error) {
             throw new Error(`Error updating data in ${this.tableName}: ${error.message}`);
         }
@@ -151,13 +179,10 @@ export class SupabaseTable<T extends Record<string,any>> {
             combinedData[column as keyof T] = is as T[keyof T];
         }
 
-        // Flatten für verschachtelte Objekte (Dot-Notation)
-        const flatData = this.flattenNested(combinedData as Record<string, any>);
-
-        // Native Supabase .upsert() - atomar
+        // Native Supabase .upsert() - atomar (JSONB-Spalten = kompletter Wert pro Key, kein Dot-Flatten)
         const { data, error } = await this.supabase
             .from(this.tableName)
-            .upsert(flatData, {
+            .upsert(combinedData as Record<string, any>, {
                 onConflict: onConflict as string,
             })
             .select();
@@ -219,25 +244,26 @@ export class SupabaseTable<T extends Record<string,any>> {
         return row[0]
     }
 
-     /**
-     * Flatten-Funktion für verschachtelte Objekte (Dot-Notation)
-     */
-     private flattenNested(obj: Record<string, any>, prefix = ""): Record<string, any> {
-        const res: Record<string, any> = {};
-        
-        for (const key in obj) {
-            const val = obj[key];
-            const newKey = prefix ? `${prefix}.${key}` : key;
-            
-            if (val && typeof val === "object" && !Array.isArray(val)) {
-                // Rekursiv verschachtelte Objekte flach machen
-                Object.assign(res, this.flattenNested(val, newKey));
+    /** Deep merge für JSON-Objekte (Arrays werden ersetzt, nicht per Index gemerged). */
+    private deepMergeJson(base: Record<string, any>, patch: Record<string, any>): Record<string, any> {
+        const out: Record<string, any> = { ...base };
+        for (const key of Object.keys(patch)) {
+            const pv = patch[key];
+            const bv = base[key];
+            if (
+                pv !== null &&
+                typeof pv === "object" &&
+                !Array.isArray(pv) &&
+                bv !== null &&
+                typeof bv === "object" &&
+                !Array.isArray(bv)
+            ) {
+                out[key] = this.deepMergeJson(bv as Record<string, any>, pv as Record<string, any>);
             } else {
-                res[newKey] = val;
+                out[key] = pv;
             }
         }
-
-        return res;
+        return out;
     }
 }
 
@@ -249,15 +275,30 @@ export function selectTable({tableName,possibleTables}:{tableName:string,possibl
     return table
 }
 
-/** update: Objekt mit Spaltennamen als Keys, neue Werte als Values. Bei JSON-Spalten: ganzes Objekt ODER nur geänderte Felder. */
-type NestedUpdate<T> = {
-    [K in keyof T]?: T[K] extends object ? T[K] | { [P in keyof T[K]]?: T[K][P] } : T[K]
-}; 
+/** Rekursives Partial für verschachtelte JSON/JSONB-Felder (nur Keys aus T). */
+export type DeepPartial<T> = T extends
+    | string
+    | number
+    | bigint
+    | boolean
+    | symbol
+    | undefined
+    | null
+    ? T
+    : T extends Date
+      ? T
+      : T extends (...args: unknown[]) => unknown
+        ? T
+        : T extends ReadonlyArray<infer U>
+          ? ReadonlyArray<DeepPartial<U>>
+          : T extends object
+            ? { [K in keyof T]?: DeepPartial<T[K]> }
+            : T;
 
-
-
-
-
+/** Patch-Form für `.update({ mergeJson })`: pro Spalte optional, innen tiefe Keys von T[K]. */
+export type MergeJsonPatch<T> = {
+    [K in keyof T]?: DeepPartial<T[K]>;
+};
 
 
 

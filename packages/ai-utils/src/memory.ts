@@ -43,12 +43,13 @@ export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
         const now = new Date().toISOString()
         
         // Prüfe ob Checkpoint bereits existiert um created_at zu behalten
-        const existing = await this.table.select({
+        const existingRows = await this.table.select({
             columns: ["created_at"],
             where: [{ column: "thread_id", is: threadId }],
-            first: true
+            limited_to: 1,
         })
-        
+        const existing = existingRows[0]
+
         // Behalte created_at wenn bereits vorhanden, sonst setze jetzt
         const createdAt = existing?.created_at || now
         
@@ -69,13 +70,13 @@ export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
     async get(config: LangGraphRunnableConfig): Promise<Checkpoint | undefined> {
         const threadId = config.configurable?.thread_id || "default"
         
-        const data = await this.table.select({
+        const rows = await this.table.select({
             columns: ["checkpoint"],
             where: [{ column: "thread_id", is: threadId }],
-            first: true
+            limited_to: 1,
         })
-        
-        return data?.checkpoint
+
+        return rows[0]?.checkpoint
     }
     
     async *list(config: LangGraphRunnableConfig, options?: CheckpointListOptions): AsyncGenerator<CheckpointTuple> {

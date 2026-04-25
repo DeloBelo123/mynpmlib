@@ -1,5 +1,6 @@
 import { z } from "zod/v3"
-import type { OutputSchema } from "./chain"
+import { PromptTemplate } from "@langchain/core/prompts"
+import type { InvokeInputBase, OutputSchema } from "./chain"
 import { DynamicStructuredTool} from "../imports"
 import { BaseChatModel } from "../imports"
 import { BaseCheckpointSaver } from "../imports"
@@ -15,6 +16,25 @@ import { structure } from "../magic-funcs/parsers/structure"
     "createRAGTool" func oder so ein scheiss und gib den einfach beim init ein. mach sogar die "setContext()" func weg, wenn man 
     rag eingeben will dann soll man die "addTool()" func aufrufen mit dem RAGTool amk. entfern alles "...Context()" relatete!
 */
+
+async function resolveSystemPromptBlocks(
+    blocks: Array<["system", string]>,
+    promptVars?: Record<string, any>
+): Promise<Array<["system", string]>> {
+    if (!promptVars || Object.keys(promptVars).length === 0) {
+        return blocks
+    }
+    const out: Array<["system", string]> = []
+    for (const [role, text] of blocks) {
+        try {
+            const formatted = await PromptTemplate.fromTemplate(text).format(promptVars as Record<string, any>)
+            out.push([role, formatted])
+        } catch {
+            out.push([role, text])
+        }
+    }
+    return out
+}
 
 interface AgentProps<T extends OutputSchema>{
     tools: DynamicStructuredTool[]
@@ -87,8 +107,8 @@ export class Agent<T extends OutputSchema> {
         this.memory = memory
     }
 
-    public async invoke(invokeInput: Record<string, any> & { thread_id?: string, debug?: boolean }): Promise<T extends undefined ? string : z.infer<T>> {
-        const { thread_id, debug, ...variables } = invokeInput
+    public async invoke(invokeInput: InvokeInputBase & { thread_id?: string }): Promise<T extends undefined ? string : z.infer<T>> {
+        const { thread_id, debug, promptVars, ...variables } = invokeInput
 
         if(this.memory && !thread_id) throw new Error("thread_id is required when using memory, else no memory is stored")
         if(!this.memory && thread_id) console.warn("WARN: thread_id is provided but no memory is set, so no memory is stored")
@@ -97,13 +117,14 @@ export class Agent<T extends OutputSchema> {
             ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
         );
 
+        const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
 
         this.agent = createReactAgent({
             llm: this.llm as any,
             tools: this.tools as any,
             checkpointSaver: this.memory as any,
             prompt: (state) => [
-                ...this.prompt,  
+                ...resolvedPrompt,  
                 ...state.messages  
             ] 
         })
@@ -124,7 +145,7 @@ export class Agent<T extends OutputSchema> {
     }
 
     /** bro nutzt später vielleicht intern mal die native .stream() von createReactAgent */
-    public async *stream(invokeInput: Record<string, any> & { thread_id?: string, debug?: boolean, stream_delay?: number }): AsyncGenerator<string, void, unknown> {
+    public async *stream(invokeInput: InvokeInputBase & { thread_id?: string; stream_delay?: number }): AsyncGenerator<string, void, unknown> {
         this.should_use_output = false
         try{
             const { stream_delay = 50, ...rest } = invokeInput

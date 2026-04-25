@@ -1,7 +1,7 @@
 import { BaseCheckpointSaver, HumanMessage, AIMessage, LangGraphRunnableConfig, BaseMessage, CheckpointMetadata, VectorStore, MessagesPlaceholder, type Checkpoint } from "../imports"
 import { BaseChatModel } from "../imports"
 import { SmartCheckpointSaver } from "../memory"
-import { Chain, DEFAULT_OUTPUT_SCHEMA, type OutputSchema } from "./chain"
+import { Chain, DEFAULT_OUTPUT_SCHEMA, type InvokeInputBase, type OutputSchema } from "./chain"
 import { MemorySaver } from "../imports"
 import { z } from "zod/v3"
 import { getLLM } from "../helpers"
@@ -60,7 +60,7 @@ export class MemoryChain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA>{
         }
     }
 
-    public async invoke(input: Record<string, any> & { thread_id: string, debug?: boolean }): Promise<z.infer<T>> {
+    public async invoke(input: InvokeInputBase & { thread_id: string }): Promise<z.infer<T>> {
         const config: LangGraphRunnableConfig = {
             configurable: { thread_id: input.thread_id }
         }
@@ -74,11 +74,10 @@ export class MemoryChain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA>{
 
         const historyText = this.messagesToHistoryText(historyMessages)
 
-        const { thread_id, debug, ...restInput } = input
+        const { thread_id, debug, promptVars, ...restInput } = input
         
         const invokeInput: Record<string, any> = {}
         for (const key in restInput) {
-            if (key === "debug") continue
             const value = restInput[key]
             if (historyText) {
                 invokeInput[key] = typeof value === 'string' 
@@ -91,6 +90,9 @@ export class MemoryChain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA>{
 
         if (debug) {
             invokeInput.debug = true
+        }
+        if (promptVars !== undefined) {
+            invokeInput.promptVars = promptVars
         }
 
         const response = await this.chain.invoke(invokeInput)
@@ -109,7 +111,7 @@ export class MemoryChain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA>{
         return response
     }
 
-    public async *stream(input:Record<string,any> & { thread_id:string }): AsyncGenerator<string, string, unknown> {
+    public async *stream(input: InvokeInputBase & { thread_id: string }): AsyncGenerator<string, string, unknown> {
         const config: LangGraphRunnableConfig = {
             configurable: { thread_id: input.thread_id }
         }
@@ -123,7 +125,7 @@ export class MemoryChain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA>{
 
         const historyText = this.messagesToHistoryText(historyMessages)
 
-        const { thread_id, ...restInput } = input
+        const { thread_id, promptVars, debug, ...restInput } = input
 
         const userMessages = Object.entries(restInput).map(([key, value]) => 
             new HumanMessage(`${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
@@ -138,6 +140,12 @@ export class MemoryChain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA>{
             } else {
                 streamInput[key] = restInput[key]
             }
+        }
+        if (debug) {
+            streamInput.debug = true
+        }
+        if (promptVars !== undefined) {
+            streamInput.promptVars = promptVars
         }
 
         const chunks: string[] = []
