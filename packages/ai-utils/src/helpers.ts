@@ -1,3 +1,4 @@
+import { input } from "@delofarag/base-utils/server";
 import { BaseChatModel, BaseOutputParser, ChatGroq, ChatOllama, ChatOpenAI, ChatPromptTemplate, StringOutputParser, StructuredOutputParser } from "./imports";
 import { z } from "zod/v3";
 
@@ -234,3 +235,4 @@ export function outputschema(zodschema: z.ZodObject<any>): {
   const prompt = `You MUST respond ONLY with valid JSON matching this exact schema:\n${parser.getFormatInstructions()}\n\nIMPORTANT: \n- Output ONLY valid JSON, no markdown code blocks\n- No backslashes or line breaks in strings\n- All strings must be on single lines\n- Do NOT wrap in \`\`\`json\`\`\` blocks\n- Return the JSON object DIRECTLY`
   return { prompt,parser }
 }
+

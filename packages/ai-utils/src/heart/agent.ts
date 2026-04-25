@@ -8,7 +8,7 @@ import { VectorStore } from "../imports"
 import { turn_to_docs, baseSplitter } from "../rag"
 import { createReactAgent } from "../imports"
 import { HumanMessage} from "../imports"
-import { getLLM, stream } from "../helpers"
+import { getLLM } from "../helpers"
 import { structure } from "../magic-funcs/parsers/structure"
 
 /*
@@ -36,7 +36,7 @@ async function resolveSystemPromptBlocks(
     return out
 }
 
-interface AgentProps<T extends OutputSchema>{
+interface AgentProps<T extends OutputSchema | undefined = undefined>{
     tools: DynamicStructuredTool[]
     prompt?: string | Array<string>
     llm?: BaseChatModel
@@ -73,7 +73,7 @@ interface AgentProps<T extends OutputSchema>{
     }
  * @param output - Zod-Schema: beschreibt die Struktur des Rückgabewerts von .invoke()
  */
-export class Agent<T extends OutputSchema> {
+export class Agent<T extends OutputSchema | undefined = undefined> {
     private prompt: Array<["system", string]>
     private tools: DynamicStructuredTool[]
     private llm: BaseChatModel
@@ -107,7 +107,10 @@ export class Agent<T extends OutputSchema> {
         this.memory = memory
     }
 
-    public async invoke(invokeInput: InvokeInputBase & { thread_id?: string }): Promise<T extends undefined ? string : z.infer<T>> {
+    /** bruder ich weiss functional overloading tot aber muss hier sein! so kann sicher gesagt werden: wenn kein output gesetzt = string, wenn doch = z.infer<output>! */
+    public async invoke(this: Agent<undefined>, invokeInput: InvokeInputBase & { thread_id?: string }): Promise<string>
+    public async invoke<U extends OutputSchema>(this: Agent<U>, invokeInput: InvokeInputBase & { thread_id?: string }): Promise<z.infer<U>>
+    public async invoke(invokeInput: InvokeInputBase & { thread_id?: string }): Promise<string | z.infer<OutputSchema>> {
         const { thread_id, debug, promptVars, ...variables } = invokeInput
 
         if(this.memory && !thread_id) throw new Error("thread_id is required when using memory, else no memory is stored")
@@ -138,22 +141,55 @@ export class Agent<T extends OutputSchema> {
         const content = typeof raw === "string" ? raw : (Array.isArray(raw) ? raw.map((c: any) => c?.text ?? c).join("") : String(raw ?? ""))
 
         if (this.output && this.should_use_output) {
-            return await structure({ data: content, into: this.output, llm: this.llm }) as any
+            return await structure({ data: content, into: this.output, llm: this.llm })
         } else {
-            return content as any
+            return content
         }
     }
 
-    /** bro nutzt später vielleicht intern mal die native .stream() von createReactAgent */
     public async *stream(invokeInput: InvokeInputBase & { thread_id?: string; stream_delay?: number }): AsyncGenerator<string, void, unknown> {
         this.should_use_output = false
-        try{
-            const { stream_delay = 50, ...rest } = invokeInput
-            const response = await this.invoke(rest)
-            const responseStr = typeof response === "string" ? response : JSON.stringify(response)
-            const words = responseStr.split(" ")
-            for await (const word of stream(words,stream_delay)){
-                yield word + " "
+        try {
+            const { thread_id, promptVars, ...variables } = invokeInput
+
+            if (this.memory && !thread_id) throw new Error("thread_id is required when using memory, else no memory is stored")
+            if (!this.memory && thread_id) console.warn("WARN: thread_id is provided but no memory is set, so no memory is stored")
+
+            const humanMessages: HumanMessage[] = Object.entries(variables).map(
+                ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
+            )
+
+            const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
+
+            this.agent = createReactAgent({
+                llm: this.llm as any,
+                tools: this.tools as any,
+                checkpointSaver: this.memory as any,
+                prompt: (state) => [
+                    ...resolvedPrompt,
+                    ...state.messages
+                ]
+            })
+
+            const config = thread_id && this.memory ? { configurable: { thread_id } } : undefined
+            if (thread_id && !this.memory) console.warn("thread_id wurde beim invoke des agenten mitgegeben aber keine memory, somit wird nichts gespeichert und die thread_id ist gleichgültig")
+
+            const nativeStream = await this.agent.stream(
+                { messages: humanMessages } as any,
+                { ...(config ?? {}), streamMode: "messages" } as any
+            )
+
+            for await (const chunk of nativeStream) {
+                const messageChunk = Array.isArray(chunk) ? chunk[0] : chunk
+                const raw = messageChunk?.content
+                if (typeof raw === "string") {
+                    if (raw.length > 0) yield raw
+                    continue
+                }
+                if (Array.isArray(raw)) {
+                    const text = raw.map((part: any) => part?.text ?? "").join("")
+                    if (text.length > 0) yield text
+                }
             }
         } finally {
             this.should_use_output = true
@@ -168,5 +204,6 @@ export class Agent<T extends OutputSchema> {
         return this.tools.map(tool => tool.name)
     }
 }
+
 
 
