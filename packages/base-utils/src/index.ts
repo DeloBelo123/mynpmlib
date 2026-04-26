@@ -1,6 +1,4 @@
 export * from "./util-funcs"
 export * from "./rule"
 export * from "./safe"
-export type Prettify<T> = {
-    [K in keyof T]: T[K]
-} & {}
+export * from "./types"

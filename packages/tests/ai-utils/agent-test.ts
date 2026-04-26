@@ -1,4 +1,4 @@
-import { Agent, createRAMVectoreStore, session, SmartCheckpointSaver, createRAGTool, getLLM } from "../../ai-utils/src/index"
+import { Agent, createRAMVectoreStore, session, SmartCheckpointSaver as Smart, createRAGTool, getLLM } from "../../ai-utils/src/index"
 import { MemorySaver as RAM, z } from "../../ai-utils/src/imports"
 import global_load_envs from "../load_envs"
 global_load_envs()
@@ -38,7 +38,7 @@ async function main(){
             nutze dafür je nach dem welche art von frage eines deiner rag-tools. wenn du das tool genutzt hast und 
             die antwort nicht kennst, sei ehrlich und sag dem kandidaten das.
         `,
-        memory: new SmartCheckpointSaver(new RAM()),
+        memory: new Smart(new RAM()),
         llm: getLLM({
             type: "openrouter",
             model:"openai/gpt-5.4-mini"
