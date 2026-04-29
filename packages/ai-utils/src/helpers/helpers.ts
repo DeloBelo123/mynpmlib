@@ -1,4 +1,4 @@
-import { BaseChatModel, BaseOutputParser, ChatPromptTemplate, StructuredOutputParser } from "./imports";
+import { BaseChatModel, BaseOutputParser, ChatPromptTemplate, StructuredOutputParser } from "../imports";
 import { z } from "zod/v3";
 
 export function logChunk(chunk: string) {

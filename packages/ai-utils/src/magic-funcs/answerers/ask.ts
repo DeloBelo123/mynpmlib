@@ -1,16 +1,18 @@
-import { createSimpleChain, getLLM } from "../../helpers"
+import { createSimpleChain } from "../../helpers/helpers"
+import { getLLM } from "../../helpers/llms"
 import { BaseChatModel, ChatPromptTemplate, StringOutputParser } from "../../imports"
 
-export async function ask(input:string | {llm:BaseChatModel, question:string}){
-    const llm = typeof input === "string" ? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}) : input.llm
+export async function ask({
+    llm = getLLM({ provider: "openrouter" }),
+    question
+}: {
+    llm?: BaseChatModel
+    question: string
+}){
     const prompt = ChatPromptTemplate.fromMessages([
       ["system", `Du bist ein hilfreicher Assistent.`],
       ["human", "{input}"]
     ])
     const chain = createSimpleChain(prompt, llm, new StringOutputParser())
-    if(typeof input === "string"){
-      return await chain.invoke({ input })
-    } else {
-      return await chain.invoke({ input: input.question})
-    }
+    return await chain.invoke({ input: question })
   }

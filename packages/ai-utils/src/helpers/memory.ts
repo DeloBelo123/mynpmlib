@@ -1,5 +1,6 @@
 import { SupabaseTable } from "@delofarag/supabase-utils"
-import { createSimpleChain, getLLM } from "./helpers"
+import { createSimpleChain } from "./helpers"
+import { getLLM } from "./llms"
 import {
     BaseCheckpointSaver,
     BaseMessage,
@@ -17,7 +18,7 @@ import {
     type ChannelVersions,
     StringOutputParser,
     ChatPromptTemplate
-} from "./imports"
+} from "../imports"
 
 interface SupabaseCheckpointRow {
     thread_id: string
@@ -136,7 +137,7 @@ interface SmartCheckpointSaverOptions {
         {
             messagesBeforeSummary = 12,
             maxSummaries = 7,
-            llm = getLLM({ type:"groq" }),
+            llm = getLLM({ provider:"openrouter", model: "openai/gpt-5.4-mini"}),
             debug = false
         }: SmartCheckpointSaverOptions = {}
     ) {
@@ -160,7 +161,7 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
         checkpointSaver: BaseCheckpointSaver,{
             messagesBeforeSummary = 12,
             maxSummaries = 7,
-            llm = getLLM({ type:"groq" }),
+            llm = getLLM({ provider:"openrouter", model: "openai/gpt-5.4-mini"}),
             debug = false
         }: SmartCheckpointSaverOptions = {}
     ) {

@@ -1,9 +1,10 @@
-import { createSimpleChain } from "../../helpers"
+import { createSimpleChain } from "../../helpers/helpers"
 import { BaseChatModel } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
 import { z } from "zod/v3"
-import { getLLM } from "../../helpers"
+
 import { StructuredOutputParser } from "../../imports"
+import { getLLM } from "../../helpers/llms"
 
 function createClassificationSchema<T extends readonly [string, ...string[]]>(classes: T) {
     return z.object({
@@ -18,7 +19,7 @@ function createClassificationSchema<T extends readonly [string, ...string[]]>(cl
   }
   
   export async function classify<T extends readonly [string, ...string[]]>({
-    llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+    llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
     data,
     classes,
     context

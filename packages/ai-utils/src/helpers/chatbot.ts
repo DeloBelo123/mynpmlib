@@ -1,7 +1,7 @@
 import { input } from "@delofarag/base-utils/server"
 import { logChunk } from "./helpers"
-import type { Agent } from "./heart/agent"
-import type { MemoryChain } from "./heart/memorychain"
+import type { Agent } from "../heart/agent"
+import type { MemoryChain } from "../heart/memorychain"
 
 type SessionStreamable = Agent<any> | MemoryChain<any>
 

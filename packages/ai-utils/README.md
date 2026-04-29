@@ -19,9 +19,9 @@ Du kannst jederzeit ein eigenes LLM übergeben (z.B. anderes Modell, anderer Pro
 
 | Typ | Beispiel |
 |-----|----------|
-| **Groq** | `getLLM({ type: "groq", apikey: process.env.CHATGROQ_API_KEY!, model: "llama-3.3-70b-versatile" })` |
-| **OpenRouter** | `getLLM({ type: "openrouter", apikey: process.env.OPENROUTER_API_KEY!, model: "openai/gpt-4o-mini" })` |
-| **Ollama (lokal)** | `getLLM({ type: "local", model: "llama3.2:3b" })` |
+| **Groq** | `getLLM({ provider: "chatgroq", apikey: process.env.CHATGROQ_API_KEY!, model: "llama-3.3-70b-versatile" })` |
+| **OpenRouter** | `getLLM({ provider: "openrouter", apikey: process.env.OPENROUTER_API_KEY!, model: "openai/gpt-4o-mini" })` |
+| **Ollama (lokal)** | `getLLM({ provider: "local", model: "llama3.2:3b" })` |
 
 ---
 
@@ -72,7 +72,7 @@ const result = await chain.invoke({ input: "Was ist die Hauptstadt von Frankreic
 ```ts
 import { MemoryChain, SmartCheckpointSaver, MemorySaver, getLLM } from "@delofarag/ai-utils"
 
-const llm = getLLM({ type: "groq", apikey: process.env.CHATGROQ_API_KEY! })
+const llm = getLLM({ provider: "chatgroq", apikey: process.env.CHATGROQ_API_KEY! })
 
 const memoryChain = new MemoryChain({
     memory: new SmartCheckpointSaver(new MemorySaver(), { llm }),
@@ -124,7 +124,7 @@ const registry = new ToolRegistry([
 const agent = new Agent({
     prompt: "Du bist ein hilfreicher Assistent mit Zugang zu Tools.",
     tools: registry.allTools,
-    llm: getLLM({ type: "groq" }),
+    llm: getLLM({ provider: "chatgroq" }),
     memory: new SmartCheckpointSaver(new MemorySaver(), { llm }) // optional
 })
 
@@ -156,14 +156,14 @@ import { Chatbot, createRAGTool, createFaissStore, tavilySearchTool, getLLM } fr
 // Ohne Tools, mit RAG → MemoryChain + vectorStore
 const vectorStore = await createFaissStore(["Kontextdaten..."])
 const simpleChatbot = new Chatbot({
-    llm: getLLM({ type: "groq" }),
+    llm: getLLM({ provider: "chatgroq" }),
     prompt: "Du bist ein freundlicher Assistent.",
     vectorStore
 })
 
 // Mit Tools → Agent (RAG als Tool möglich)
 const toolChatbot = new Chatbot({
-    llm: getLLM({ type: "groq" }),
+    llm: getLLM({ provider: "chatgroq" }),
     tools: [
         tavilySearchTool,
         createRAGTool({ vectorStore, name: "search", description: "Durchsucht den Kontext" })
@@ -329,7 +329,7 @@ Wrapper um einen anderen `BaseCheckpointSaver` (z.B. `MemorySaver` oder `Supabas
 ```ts
 import { SmartCheckpointSaver, MemorySaver, getLLM } from "@delofarag/ai-utils"
 
-const llm = getLLM({ type: "groq", apikey: process.env.CHATGROQ_API_KEY! })
+const llm = getLLM({ provider: "chatgroq", apikey: process.env.CHATGROQ_API_KEY! })
 const memory = new SmartCheckpointSaver(new MemorySaver(), {
     llm,
     messagesBeforeSummary: 12,

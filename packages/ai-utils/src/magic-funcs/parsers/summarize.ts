@@ -1,11 +1,11 @@
 import { StringOutputParser } from "@langchain/core/output_parsers"
-import { createSimpleChain } from "../../helpers"
+import { createSimpleChain } from "../../helpers/helpers"
 import { BaseChatModel } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
-import { getLLM } from "../../helpers"
+import { getLLM } from "../../helpers/llms"
 
 export async function summarize({
-    llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+    llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
     data,
     fokuss,
     maxWords = 150

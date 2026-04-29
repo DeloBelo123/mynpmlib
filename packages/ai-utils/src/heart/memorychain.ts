@@ -1,10 +1,10 @@
 import { BaseCheckpointSaver, HumanMessage, AIMessage, LangGraphRunnableConfig, BaseMessage, CheckpointMetadata, VectorStore, MessagesPlaceholder, type Checkpoint } from "../imports"
 import { BaseChatModel } from "../imports"
-import { SmartCheckpointSaver } from "../memory"
+import { SmartCheckpointSaver } from "../helpers/memory"
 import { Chain, DEFAULT_OUTPUT_SCHEMA, type InvokeInputBase, type OutputSchema } from "./chain"
 import { MemorySaver } from "../imports"
 import { z } from "zod/v3"
-import { getLLM } from "../helpers"
+import { getLLM } from "../helpers/llms"
 
 type MemoryChainProps<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> = { llm?:BaseChatModel,memory?: BaseCheckpointSaver } & ({
     chain: Chain<T>
@@ -18,12 +18,12 @@ type MemoryChainProps<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> = {
  * CONSTRUCTOR 
  * @example 
  * constructor({memory, ...rest}: MemoryChainProps<T>){
-        this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}) })
+        this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm ?? getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}) })
         if ("chain" in rest){
             this.chain = rest.chain
         } else {
             this.chain = new Chain<T>({
-                llm: rest.llm ?? getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+                llm: rest.llm ?? getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
                 prompt: rest.prompt ?? "Du bist ein hilfreicher Assistent der mit dem User ein höffliches und hilfreiches Gespräch führt",
                 output: (rest.output ?? DEFAULT_OUTPUT_SCHEMA) as unknown as T
                 vectorStore: rest.vectorStore ?? undefined
@@ -47,12 +47,12 @@ export class MemoryChain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA>{
     private chain: Chain<T>
 
     constructor({memory, ...rest}: MemoryChainProps<T>){
-        this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm ?? getLLM({ type:"groq" }) })
+        this.memory = memory ?? new SmartCheckpointSaver(new MemorySaver(), { llm: rest.llm ?? getLLM({ provider:"openrouter", model: "openai/gpt-5.4-mini"}) })
         if ("chain" in rest){
             this.chain = rest.chain
         } else {
             this.chain = new Chain<T>({
-                llm: rest.llm ?? getLLM({ type:"groq" }),
+                llm: rest.llm ?? getLLM({ provider:"openrouter", model: "openai/gpt-5.4-mini"}),
                 prompt: rest.prompt ?? "Du bist ein hilfreicher Assistent der mit dem User ein höffliches und hilfreiches Gespräch führt",
                 output: (rest.output ?? DEFAULT_OUTPUT_SCHEMA) as unknown as T,
                 vectorStore: rest.vectorStore ?? undefined

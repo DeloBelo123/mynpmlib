@@ -4,18 +4,11 @@ import type { InvokeInputBase, OutputSchema } from "./chain"
 import { DynamicStructuredTool} from "../imports"
 import { BaseChatModel } from "../imports"
 import { BaseCheckpointSaver } from "../imports"
-import { VectorStore } from "../imports"
-import { turn_to_docs, baseSplitter } from "../rag"
 import { createReactAgent } from "../imports"
 import { HumanMessage} from "../imports"
-import { getLLM } from "../helpers"
-import { structure } from "../magic-funcs/parsers/structure"
 
-/*
-    KOMPLETTER REWRITTE: lösch die ganze rag scheisse beim init und behandle die wie normale tools du pic, erstell einfach eine
-    "createRAGTool" func oder so ein scheiss und gib den einfach beim init ein. mach sogar die "setContext()" func weg, wenn man 
-    rag eingeben will dann soll man die "addTool()" func aufrufen mit dem RAGTool amk. entfern alles "...Context()" relatete!
-*/
+import { structure } from "../magic-funcs/parsers/structure"
+import { getLLM } from "../helpers/llms"
 
 async function resolveSystemPromptBlocks(
     blocks: Array<["system", string]>,
@@ -49,7 +42,7 @@ interface AgentProps<T extends OutputSchema | undefined = undefined>{
  * @example 
  * constructor({
         prompt = `Du bist ein hilfreicher Assistent.`,
-        llm = getLLM({ type:"groq" }),
+        llm = getLLM({ provider:"openrouter", model: "openai/gpt-5.4-mini"}),
         tools,
         output,
         memory,
@@ -84,7 +77,7 @@ export class Agent<T extends OutputSchema | undefined = undefined> {
 
     constructor({
         prompt = `Du bist ein hilfreicher Assistent.`,
-        llm = getLLM({ type:"groq" }),
+        llm = getLLM({ provider:"openrouter", model: "openai/gpt-5.4-mini"}),
         tools,
         output,
         memory,

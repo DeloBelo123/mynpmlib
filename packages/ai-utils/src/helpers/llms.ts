@@ -1,4 +1,4 @@
-import { ChatGroq, ChatOllama, ChatOpenAI } from "./imports";
+import { ChatGroq, ChatOllama, ChatOpenAI } from "../imports";
 
 export type Prettify<T> = {
   [K in keyof T]: T[K]
@@ -227,38 +227,53 @@ export type LocalModel = AutoComplete<
   | "llama3.2:3b"
 >
 
-export type LLMConfig =
-  | { type: "groq"; model?: ChatGroqModel; apikey?: string }
-  | { type: "openrouter"; model?: OpenRouterModel; apikey?: string }
-  | { type: "local"; model?: string }
+export type LLMModelSpecification = "vision" | "image-gen" | "stt" | "tts"
 
-export type VisionLLMConfig =
-  | { type: "groq"; model?: ChatGroqVisionModel; apikey?: string }
-  | { type: "openrouter"; model?: OpenRouterVisionModel; apikey?: string }
-  | { type: "local"; model?: string }
+type GroqLLMConfig =
+  | { provider: "chatgroq"; type?: undefined; model?: ChatGroqModel; apikey?: string }
+  | { provider: "chatgroq"; type: "vision"; model?: ChatGroqVisionModel; apikey?: string }
+  | { provider: "chatgroq"; type: "stt"; model?: ChatGroqSTTModel; apikey?: string }
+  | { provider: "chatgroq"; type: "tts"; model?: ChatGroqTTSModel; apikey?: string }
 
-export type TTSLLMConfig =
-  | { type: "groq"; model?: ChatGroqTTSModel; apikey?: string }
-  | { type: "openrouter"; model?: OpenRouterTTSModel; apikey?: string }
+type OpenRouterLLMConfig =
+  | { provider: "openrouter"; type?: undefined; model?: OpenRouterModel; apikey?: string }
+  | { provider: "openrouter"; type: "vision"; model?: OpenRouterVisionModel; apikey?: string }
+  | { provider: "openrouter"; type: "stt"; model?: OpenRouterSTTModel; apikey?: string }
+  | { provider: "openrouter"; type: "tts"; model?: OpenRouterTTSModel; apikey?: string }
+  | { provider: "openrouter"; type: "image-gen"; model?: OpenRouterImageGenModel; apikey?: string }
 
-export type STTLLMConfig =
-  | { type: "groq"; model?: ChatGroqSTTModel; apikey?: string }
-  | { type: "openrouter"; model?: OpenRouterSTTModel; apikey?: string }
-  | { type: "local"; model?: string }
+type LocalLLMConfig =
+  | { provider: "local"; type?: undefined; model?: LocalModel }
 
-export type ImageGenLLMConfig =
-  | { type: "openrouter"; model?: OpenRouterImageGenModel; apikey?: string }
+export type LLMConfig = GroqLLMConfig | OpenRouterLLMConfig | LocalLLMConfig
 
   /**
-   * openrouter: process.env.OPENROUTER_API_KEY
-   * groq: process.env.CHATGROQ_API_KEY
+   * env-var for openrouter: process.env.OPENROUTER_API_KEY
+   * 
+   * env-var for chatgroq: process.env.CHATGROQ_API_KEY
+   * 
+   * default llm for chatgroq: "llama-3.3-70b-versatile"
+   * 
+   * default llm for openrouter: "openai/gpt-5.4-mini"
+   * 
+   * default llm for local: "llama3.2:3b"
    */
 export function getLLM(config: LLMConfig) {
-  switch (config.type) {
-    case "groq":
+  const type = config.type
+
+  switch (config.provider) {
+    case "chatgroq":
       return new ChatGroq({
         apiKey: config.apikey ?? process.env.CHATGROQ_API_KEY,
-        model: config.model ?? "llama-3.3-70b-versatile"
+        model: config.model ?? (
+          type === "vision"
+            ? "meta-llama/llama-4-scout-17b-16e-instruct"
+            : type === "stt"
+              ? "whisper-large-v3-turbo"
+              : type === "tts"
+                ? "canopylabs/orpheus-v1-english"
+                : "llama-3.3-70b-versatile"
+        )
       });
 
     case "openrouter":
@@ -267,7 +282,15 @@ export function getLLM(config: LLMConfig) {
         configuration: {
             baseURL: "https://openrouter.ai/api/v1",
         },
-        model: config.model ?? "openai/gpt-5.4-mini"
+        model: config.model ?? (
+          type === "image-gen"
+            ? "google/gemini-3.1-flash-image-preview"
+            : type === "stt"
+              ? "google/gemini-2.5-flash"
+              : type === "tts"
+                ? "openai/gpt-4o-mini-tts-2025-12-15"
+                : "openai/gpt-5.4-mini"
+        )
       });
 
     case "local":
@@ -276,102 +299,7 @@ export function getLLM(config: LLMConfig) {
       });
 
     default:
-      throw new Error("Unknown LLM kind");
+      throw new Error("Unknown LLM provider");
   }
 }
 
-export function getVisionLLM(config: VisionLLMConfig) {
-  switch (config.type) {
-    case "groq":
-      return new ChatGroq({
-        apiKey: config.apikey ?? process.env.CHATGROQ_API_KEY,
-        model: config.model ?? "meta-llama/llama-4-scout-17b-16e-instruct"
-      });
-
-    case "openrouter":
-      return new ChatOpenAI({
-        apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
-        configuration: {
-          baseURL: "https://openrouter.ai/api/v1",
-        },
-        model: config.model ?? "openai/gpt-5.4-mini"
-      });
-
-    case "local":
-      return new ChatOllama({
-        model: config.model ?? "llama3.2:3b"
-      });
-
-    default:
-      throw new Error("Unknown vision LLM kind");
-  }
-}
-
-/**
- * Hinweis: TTS-Modelle sind oft über Audio/Speech-Endpunkte gedacht.
- * Diese Funktion hält nur das gleiche Getter-Schema mit korrekten Model-Typen.
- */
-export function getTTSLLM(config: TTSLLMConfig) {
-  switch (config.type) {
-    case "groq":
-      return new ChatGroq({
-        apiKey: config.apikey ?? process.env.CHATGROQ_API_KEY,
-        model: config.model ?? "canopylabs/orpheus-v1-english"
-      });
-
-    case "openrouter":
-      return new ChatOpenAI({
-        apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
-        configuration: {
-          baseURL: "https://openrouter.ai/api/v1",
-        },
-        model: config.model ?? "openai/gpt-4o-mini-tts-2025-12-15"
-      });
-
-    default:
-      throw new Error("Unknown TTS LLM kind");
-  }
-}
-
-export function getSTTLLM(config: STTLLMConfig) {
-  switch (config.type) {
-    case "groq":
-      return new ChatGroq({
-        apiKey: config.apikey ?? process.env.CHATGROQ_API_KEY,
-        model: config.model ?? "whisper-large-v3-turbo"
-      });
-
-    case "openrouter":
-      return new ChatOpenAI({
-        apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
-        configuration: {
-          baseURL: "https://openrouter.ai/api/v1",
-        },
-        model: config.model ?? "google/gemini-2.5-flash"
-      });
-
-    case "local":
-      return new ChatOllama({
-        model: config.model ?? "llama3.2:3b"
-      });
-
-    default:
-      throw new Error("Unknown STT LLM kind");
-  }
-}
-
-export function getImageGenLLM(config: ImageGenLLMConfig) {
-  switch (config.type) {
-    case "openrouter":
-      return new ChatOpenAI({
-        apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
-        configuration: {
-          baseURL: "https://openrouter.ai/api/v1",
-        },
-        model: config.model ?? "google/gemini-3.1-flash-image-preview"
-      });
-
-    default:
-      throw new Error("Unknown image generation LLM kind");
-  }
-}

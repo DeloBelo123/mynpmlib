@@ -1,11 +1,11 @@
-import { getLLM } from "../../helpers"
+import { getLLM } from "../../helpers/llms"
 import { BaseChatModel } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
-import { createSimpleChain } from "../../helpers"
+import { createSimpleChain } from "../../helpers/helpers"
 import { StringOutputParser } from "../../imports"
 
 export async function ragify({
-    llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+    llm = getLLM({ provider: "chatgroq", apikey: process.env.CHATGROQ_API_KEY ?? "" }),
     data,
   }: {
     llm?: BaseChatModel

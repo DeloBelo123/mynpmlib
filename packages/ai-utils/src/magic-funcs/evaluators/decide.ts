@@ -1,9 +1,10 @@
 import { z } from "zod/v3"
 import { BaseChatModel } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
-import { getLLM } from "../../helpers"
+
 import { StructuredOutputParser } from "../../imports"
-import { createSimpleChain } from "../../helpers"
+import { createSimpleChain } from "../../helpers/helpers"
+import { getLLM } from "../../helpers/llms"
 
 const decideSchema = z.object({
     decision: z.enum(["yes", "no", "unclear"])
@@ -21,7 +22,7 @@ const decideSchema = z.object({
   })
   
   export async function decide({
-    llm = getLLM({type:"groq", apikey: process.env.CHATGROQ_API_KEY ?? ""}),
+    llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
     material,
     kriteria_to_decide
   }: {
