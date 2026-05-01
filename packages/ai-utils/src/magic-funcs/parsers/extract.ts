@@ -6,6 +6,29 @@ import { z } from "zod/v3"
 import { StructuredOutputParser } from "../../imports"
 import { getLLM } from "../../helpers/llms"
 
+/**
+ * Extrahiert strukturierte Daten aus unstrukturiertem Input anhand eines Zod-Schemas.
+ *
+ * Sinnvoll fuer Information Extraction aus Texten, Notizen, Tickets oder Logs.
+ *
+ * @param params.llm Optionales Chat-LLM.
+ * @param params.data Eingabedaten (String oder Objekt).
+ * @param params.goal Optionales Extraktionsziel zur Fokussierung.
+ * @param params.schema Zod-Schema der gewuenschten Ausgabe.
+ * @returns Geparstes Ergebnis als `z.infer<T>`.
+ *
+ * @example
+ * ```ts
+ * const result = await extract({
+ *   data: "Max Mustermann, 32, Berlin",
+ *   schema: z.object({
+ *     name: z.string(),
+ *     age: z.number(),
+ *     city: z.string()
+ *   })
+ * })
+ * ```
+ */
 export async function extract<T extends z.ZodObject<any>>({
     llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
     data,

@@ -4,6 +4,24 @@ import { ChatPromptTemplate } from "../../imports"
 import { createSimpleChain } from "../../helpers/helpers"
 import { StringOutputParser } from "../../imports"
 
+/**
+ * Erzeugt aus einer Nutzeranforderung einen robusten System-Prompt fuer Agents.
+ *
+ * Sinnvoll wenn aus vagen Anforderungen ein klarer, wiederverwendbarer Prompt entstehen soll.
+ *
+ * @param params.llm Optionales Chat-LLM.
+ * @param params.request Urspruengliche Nutzeranfrage.
+ * @param params.agentRole Optionaler Rollen-Kontext fuer den Ziel-Agenten.
+ * @returns Finaler System-Prompt als String.
+ *
+ * @example
+ * ```ts
+ * const systemPrompt = await promptify({
+ *   request: "Baue einen Assistenten fuer technische Kundentickets.",
+ *   agentRole: "Senior Support Engineer"
+ * })
+ * ```
+ */
 export async function promptify({
     llm = getLLM({ provider: "chatgroq", apikey: process.env.CHATGROQ_API_KEY ?? "" }),
     request,

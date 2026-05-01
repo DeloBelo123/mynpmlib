@@ -4,6 +4,26 @@ import { BaseChatModel } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
 import { getLLM } from "../../helpers/llms"
 
+/**
+ * Fasst Input kompakt und faktengetreu zusammen.
+ *
+ * Sinnvoll fuer Report-Kuerzung, Ticket-Digests, Meeting-Recaps oder Vorverarbeitung.
+ *
+ * @param params.llm Optionales Chat-LLM.
+ * @param params.data Zu zusammenfassender Input.
+ * @param params.fokuss Optionaler Fokusbereich fuer die Zusammenfassung.
+ * @param params.maxWords Maximal erlaubte Wortanzahl.
+ * @returns Zusammenfassung als String.
+ *
+ * @example
+ * ```ts
+ * const summary = await summarize({
+ *   data: longText,
+ *   fokuss: "Risiken und naechste Schritte",
+ *   maxWords: 80
+ * })
+ * ```
+ */
 export async function summarize({
     llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
     data,

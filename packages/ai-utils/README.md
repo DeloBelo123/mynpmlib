@@ -1,194 +1,241 @@
 # @delofarag/ai-utils
 
-Ein Bauskasten für LLM-basierte Anwendungen: Chains, Agents, Memory, RAG, Magic-Funcs und mehr.
+Ein praktisches Utility-Package für LLM-Apps mit LangChain:
+
+- `Chain`, `MemoryChain`, `Agent`
+- RAG-Helper (FAISS, Supabase, In-Memory)
+- Tooling (`ToolRegistry`, `createRAGTool`, `tavilySearchTool`)
+- Magic-Funcs (Parser, Evaluator, Optimizer, Answerer)
+- Modalities (STT, TTS, Vision, Image Generation)
 
 ---
 
-## ⚠️ Disclaimer: Default-LLM & getLLM()
+## Standard-Default (wichtig)
 
-(btw. nutz zod/v3, neuere versionen sind buggy mit langchain)
+Im Package gilt als Standard-LLM-Default für die allgemeine Nutzung:
 
-**Für alle LLM-gebundenen Utils** (Chain, MemoryChain, Agent, Chatbot, magic-funcs) gilt:
+- **Provider:** `openrouter`
+- **Model:** `openai/gpt-5.4-mini`
 
-- **Default-Modell:** `llama-3.3-70b-versatile` von **ChatGroq**
-- **API-Key:** `process.env.CHATGROQ_API_KEY`
+Wenn du nichts explizit setzt, orientiere dich an diesem Default in deinen Aufrufen.
 
-**Wenn du `CHATGROQ_API_KEY` in deiner `.env` setzt und mit dem Modell zufrieden bist, musst du kein LLM übergeben** – alles funktioniert out-of-the-box.
-
-Du kannst jederzeit ein eigenes LLM übergeben (z.B. anderes Modell, anderer Provider). Optimal dafür: die **`getLLM()`** Funktion aus `helpers.ts`. Sie ist eine Abstraktionsschicht für:
-
-| Typ | Beispiel |
-|-----|----------|
-| **Groq** | `getLLM({ provider: "chatgroq", apikey: process.env.CHATGROQ_API_KEY!, model: "llama-3.3-70b-versatile" })` |
-| **OpenRouter** | `getLLM({ provider: "openrouter", apikey: process.env.OPENROUTER_API_KEY!, model: "openai/gpt-4o-mini" })` |
-| **Ollama (lokal)** | `getLLM({ provider: "local", model: "llama3.2:3b" })` |
+Für modality-spezifische Flows (`stt`, `tts`, `vision`, `image-gen`) wird zusätzlich mit `type` gearbeitet, damit passende Modelle gewählt werden koennen.
 
 ---
 
-## Die 4 Hauptklassen
+## Installation
 
-### 1. Chain
+```bash
+npm i @delofarag/ai-utils
+```
 
-**Was:** Stateless LLM-Chain mit strukturiertem Output (Zod-Schema) und optionalem RAG. Für `output` (Zod v3) kannst du **z.object()** oder **z.record()** verwenden.
+---
 
-**Wann:** Einmalige Abfragen ohne Konversationsgedächtnis. Ideal für formularähnliche Eingabe → strukturierte Ausgabe.
+## Environment Variables
 
-**Initialisierung:**
+Empfohlen in `.env`:
+
+```env
+OPENROUTER_API_KEY=...
+CHATGROQ_API_KEY=...
+TAVILY_API_KEY=...
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+### Welche Variable wofuer?
+
+- `OPENROUTER_API_KEY`: OpenRouter-Modelle und Modalities
+- `CHATGROQ_API_KEY`: wenn du `provider: "chatgroq"` nutzt
+- `TAVILY_API_KEY`: `websearch()` / `tavilySearchTool`
+- Supabase-Variablen: fuer `createSupabaseVectoreStore()` und `getSupabaseVectorStore()`
+
+---
+
+## Schnellstart: `getLLM()`
 
 ```ts
-import { Chain, DEFAULT_OUTPUT_SCHEMA } from "@delofarag/ai-utils"
+import { getLLM } from "@delofarag/ai-utils"
+
+const llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" })
+```
+
+Beispiele:
+
+```ts
+const llmOpenRouter = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" })
+const llmGroq = getLLM({ provider: "chatgroq", model: "llama-3.3-70b-versatile" })
+const llmLocal = getLLM({ provider: "local", model: "llama3.2:3b" })
+```
+
+Modality-spezifisch:
+
+```ts
+getLLM({ provider: "openrouter", type: "stt" })
+getLLM({ provider: "openrouter", type: "tts" })
+getLLM({ provider: "openrouter", type: "vision" })
+getLLM({ provider: "openrouter", type: "image-gen" })
+```
+
+---
+
+## Core Classes
+
+## 1) `Chain`
+
+Stateless LLM-Chain fuer strukturierte Ergebnisse.
+
+### Besseres Praxisbeispiel (custom output schema)
+
+```ts
+import { Chain, getLLM } from "@delofarag/ai-utils"
 import { z } from "zod/v3"
 
-const output = z.object({
-    output: z.string().describe("Deine Antwort"),
-    score: z.number().optional()
+const productBriefSchema = z.object({
+    title: z.string().describe("Kurzer Produktname"),
+    targetAudience: z.string().describe("Wer soll das Produkt nutzen?"),
+    keyBenefits: z.array(z.string()).describe("Top Vorteile"),
+    pricePositioning: z.enum(["budget", "mid", "premium"])
 })
-// alternativ: z.record(z.string()) für beliebige Key-Value-Struktur
 
 const chain = new Chain({
-    prompt: "Du bist ein hilfreicher Assistent.",
-    // llm optional – Default: Groq
-    output
+    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
+    prompt: "Du bist ein Product-Marketing-Assistent.",
+    output: productBriefSchema
 })
 
-const result = await chain.invoke({ input: "Was ist die Hauptstadt von Frankreich?" })
-// result: { output: "Paris", score?: number }
+const result = await chain.invoke({
+    product: "AI-Notizapp fuer Teams",
+    market: "DACH SaaS"
+})
 ```
 
-**RAG:** Mit `chain.setContext(vectorStore)` und `chain.addContext(["Text 1", "Text 2"])` wird automatisch Retrieval vor dem LLM-Call eingebaut.
-
-**Warum so:** Chain ist die kleinste Einheit – nur Prompt + LLM + Output (Zod-Schema für .invoke()). Kein Memory, keine Tools. Einfach zu testen und zu komponieren.
-
----
-
-### 2. MemoryChain
-
-**Was:** Chain mit Konversationsgedächtnis. Speichert User/AI-Messages pro `thread_id`.
-
-**Wann:** Chat-ähnliche Flows, bei denen der Kontext der vorherigen Nachrichten wichtig ist.
-
-**Initialisierung:**
+### RAG mit `Chain`
 
 ```ts
-import { MemoryChain, SmartCheckpointSaver, MemorySaver, getLLM } from "@delofarag/ai-utils"
+import { Chain, createFaissStore } from "@delofarag/ai-utils"
+import { z } from "zod/v3"
 
-const llm = getLLM({ provider: "chatgroq", apikey: process.env.CHATGROQ_API_KEY! })
+const vectorStore = await createFaissStore(["Dokument A", "Dokument B"])
 
-const memoryChain = new MemoryChain({
-    memory: new SmartCheckpointSaver(new MemorySaver(), { llm }),
-    prompt: "Du bist ein hilfreicher Assistent.",
-    llm
-})
-
-const result = await memoryChain.invoke({
-    thread_id: "user-123",
-    input: "Ich heiße Max."
-})
-const result2 = await memoryChain.invoke({
-    thread_id: "user-123",
-    input: "Wie heiße ich?"
-})
-// result2.output ≈ "Du heißt Max."
-```
-
-**Alternativ:** Du kannst eine bestehende `Chain` übergeben: `new MemoryChain({ chain: myChain, memory })`.
-
-**Warum so:** MemoryChain kapselt nur die Memory-Logik – History laden, an den Prompt anhängen, Response speichern. Die eigentliche LLM-Logik bleibt in der Chain.
-
----
-
-### 3. Agent
-
-**Was:** LLM mit Tools (z.B. Web-Suche, API-Calls, RAG). Nutzt LangGraphs `createReactAgent` unter der Haube.
-
-**Wann:** Wenn das LLM externe Aktionen ausführen soll (Suche, Rechner, Datenbank, etc.).
-
-**Initialisierung:**
-
-```ts
-import { Agent, ToolRegistry, createRAGTool, createFaissStore, tavilySearchTool, getLLM } from "@delofarag/ai-utils"
-
-const vectorStore = await createFaissStore(["Dokumenteninhalt..."])
-const ragTool = createRAGTool({
-    vectorStore,
-    name: "search_context",
-    description: "Durchsucht den Kontext nach relevanten Informationen"
-})
-
-const registry = new ToolRegistry([
-    { name: "calculator", description: "...", schema: z.object({ a: z.number(), b: z.number() }), func: ({ a, b }) => a + b },
-    tavilySearchTool,
-    ragTool
-])
-
-const agent = new Agent({
-    prompt: "Du bist ein hilfreicher Assistent mit Zugang zu Tools.",
-    tools: registry.allTools,
-    llm: getLLM({ provider: "chatgroq" }),
-    memory: new SmartCheckpointSaver(new MemorySaver(), { llm }) // optional
-})
-
-const result = await agent.invoke({
-    thread_id: "session-1",  // nötig wenn memory gesetzt
-    input: "Was steht heute in den Nachrichten zu KI?"
-})
-
-agent.addTool(weiteresTool)  // Tools nachträglich hinzufügen
-```
-
-**RAG:** RAG ist ein normales Tool – nutze `createRAGTool({ vectorStore, name, description })` und füge es zu `tools` hinzu oder via `agent.addTool()`.
-
-**Warum so:** Der Agent entscheidet selbst, wann er Tools nutzt. RAG wird wie jedes andere Tool behandelt (kein setContext/addContext mehr).
-
----
-
-### 4. Chatbot
-
-**Was:** High-Level Wrapper – je nach Konfiguration entweder ein `MemoryChain` oder ein `Agent`. Discriminated Union: `tools` → Agent, `vectorStore` → MemoryChain.
-
-**Wann:** Schnell einen chatbasierten Assistenten bauen, mit oder ohne Tools.
-
-**Initialisierung:**
-
-```ts
-import { Chatbot, createRAGTool, createFaissStore, tavilySearchTool, getLLM } from "@delofarag/ai-utils"
-
-// Ohne Tools, mit RAG → MemoryChain + vectorStore
-const vectorStore = await createFaissStore(["Kontextdaten..."])
-const simpleChatbot = new Chatbot({
-    llm: getLLM({ provider: "chatgroq" }),
-    prompt: "Du bist ein freundlicher Assistent.",
+const chain = new Chain({
+    prompt: "Beantworte Fragen nur mit Kontext.",
+    output: z.object({ output: z.string() }),
     vectorStore
 })
 
-// Mit Tools → Agent (RAG als Tool möglich)
-const toolChatbot = new Chatbot({
-    llm: getLLM({ provider: "chatgroq" }),
-    tools: [
-        tavilySearchTool,
-        createRAGTool({ vectorStore, name: "search", description: "Durchsucht den Kontext" })
-    ],
-    prompt: "Du bist ein Assistent mit Webzugang."
-})
+await chain.addContext(["Dokument C"])
 
-// Streaming-Chat
-for await (const chunk of simpleChatbot.chat({ input: "Hallo!", thread_id: "user-1" })) {
-    process.stdout.write(chunk)
-}
-
-// Interaktive Session (CLI)
-await simpleChatbot.session({ breakword: "exit", id: "session-1" })
+const answer = await chain.invoke({ question: "Was steht in Dokument C?" })
 ```
-
-**Warum so:** Ein Einstiegspunkt für „einfach nur chatten“. Weniger Boilerplate als Chain/MemoryChain/Agent direkt zu bauen.
 
 ---
 
-## Tool-Registrys
+## 2) `MemoryChain`
 
-### ToolRegistry (BasicToolRegistry) – empfohlen
+`Chain` + Conversation Memory ueber `thread_id`.
 
-Registriert Tools mit `name`, `description`, `schema`, `func`. Perfekt für manuell definierte Tools.
+### Basis
+
+```ts
+import { MemoryChain, getLLM } from "@delofarag/ai-utils"
+
+const memoryChain = new MemoryChain({
+    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
+    prompt: "Du bist ein hilfreicher Assistent."
+})
+
+await memoryChain.invoke({ thread_id: "u1", input: "Ich heisse Max." })
+const r2 = await memoryChain.invoke({ thread_id: "u1", input: "Wie heisse ich?" })
+```
+
+### RAG mit `MemoryChain`
+
+```ts
+import { MemoryChain, createFaissStore } from "@delofarag/ai-utils"
+import { z } from "zod/v3"
+
+const vectorStore = await createFaissStore(["Policy A", "Policy B"])
+
+const memoryChain = new MemoryChain({
+    prompt: "Nutze Kontext und Gespraechshistorie.",
+    vectorStore,
+    output: z.object({ output: z.string() })
+})
+
+const response = await memoryChain.invoke({
+    thread_id: "support-77",
+    question: "Welche Regel steht in Policy B?"
+})
+```
+
+---
+
+## 3) `Agent`
+
+Tool-using Agent auf Basis von `createReactAgent`.
+
+### Basis
+
+```ts
+import { Agent, ToolRegistry, getLLM } from "@delofarag/ai-utils"
+import { z } from "zod/v3"
+
+const tools = new ToolRegistry([
+    {
+        name: "sum",
+        description: "Addiert zwei Zahlen",
+        schema: z.object({ a: z.number(), b: z.number() }),
+        func: ({ a, b }) => a + b
+    }
+]).allTools
+
+const agent = new Agent({
+    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
+    prompt: "Du darfst Tools nutzen wenn noetig.",
+    tools
+})
+
+const result = await agent.invoke({ input: "Was ist 8 + 13?" })
+```
+
+### RAG mit `Agent` (als Tool)
+
+```ts
+import { Agent, ToolRegistry, createRAGTool, createFaissStore } from "@delofarag/ai-utils"
+
+const vectorStore = await createFaissStore(["Release Notes 2026-04", "Known Issues"])
+const ragTool = createRAGTool({
+    vectorStore,
+    name: "search_docs",
+    description: "Sucht relevante Produktdokumente"
+})
+
+const registry = new ToolRegistry([
+    {
+        name: "search_docs",
+        description: "Sucht relevante Produktdokumente",
+        schema: ragTool.schema as any,
+        func: ragTool.func as any
+    }
+])
+
+const agent = new Agent({
+    prompt: "Nutze search_docs fuer faktenbasierte Antworten.",
+    tools: [...registry.allTools, ragTool]
+})
+```
+
+---
+
+## Tool Registry (eigene Section)
+
+`ToolRegistry` konvertiert einfache Tool-Definitionen zu `DynamicStructuredTool` und bietet:
+
+- `getTool(name)`
+- `getTools(...names)`
+- `allTools`
 
 ```ts
 import { ToolRegistry } from "@delofarag/ai-utils"
@@ -196,174 +243,265 @@ import { z } from "zod/v3"
 
 const registry = new ToolRegistry([
     {
-        name: "greet",
-        description: "Begrüßt eine Person",
-        schema: z.object({ name: z.string() }),
-        func: ({ name }) => `Hallo, ${name}!`
+        name: "get_weather",
+        description: "Liefert Wetter fuer eine Stadt",
+        schema: z.object({ city: z.string() }),
+        func: async ({ city }) => `${city}: sonnig`
+    },
+    {
+        name: "get_time",
+        description: "Liefert aktuelle Zeit",
+        schema: z.object({}),
+        func: async () => new Date().toISOString()
     }
 ])
 
-const tool = registry.getTool("greet")
-const allTools = registry.allTools
+const weatherTool = registry.getTool("get_weather")
+const tools = registry.allTools
 ```
 
-### ZodiosToolRegistry – noch experimentell
+### Tavily Tooling
 
-Wandelt Zodios-API-Endpoints automatisch in Tools um. **Funktioniert derzeit nicht zuverlässig** – nur testen, nicht für Produktion.
+```ts
+import { tavilySearchTool, TavilySearch } from "@delofarag/ai-utils"
 
-### tavilySearchTool & TAVILY_API_KEY
+const tavily = new TavilySearch({
+    tavilyApiKey: process.env.TAVILY_API_KEY,
+    maxResults: 5,
+    topic: "general",
+    includeAnswer: false
+})
 
-Das `tavilySearchTool` ist ein vorgefertigtes Tool für Web-Suche via Tavily. Nutzung:
+const response = await tavily.invoke({ query: "latest AI regulation EU" })
+```
 
-- **API-Key:** `process.env.TAVILY_API_KEY` (in `.env` setzen)
-- **Import:** `tavilySearchTool` aus `@delofarag/ai-utils`
-- **Beispiel:** Siehe Agent-Beispiel oben
+---
 
-Alternativ: `TavilySearch`-Klasse für direkten Aufruf (z.B. in `websearch()`).
+## Memory Section (ausfuehrlich)
+
+### `MemorySaver` (in-memory, schnell fuer local/dev)
+
+```ts
+import { MemorySaver, SmartCheckpointSaver, getLLM } from "@delofarag/ai-utils"
+
+const memory = new SmartCheckpointSaver(new MemorySaver(), {
+    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
+    messagesBeforeSummary: 12,
+    maxSummaries: 7
+})
+```
+
+### `SmartCheckpointSaver`
+
+Was es macht:
+
+- fasst alte Chatverlaeufe zusammen
+- reduziert Token-Kosten
+- erhaelt wichtige Fakten ueber mehrere Sessions
+
+Wichtige Optionen:
+
+- `messagesBeforeSummary` (default `12`)
+- `maxSummaries` (default `7`)
+- `llm` (default OpenRouter `gpt-5.4-mini`)
+- `debug`
+
+### `SupabaseCheckpointSaver`
+
+Persistiert Checkpoints in Supabase.
+
+```ts
+import { SupabaseCheckpointSaver, type SupabaseCheckpointRow } from "@delofarag/ai-utils"
+import { SupabaseTable } from "@delofarag/supabase-utils"
+
+const checkpointsTable = new SupabaseTable<SupabaseCheckpointRow>({
+    // ... deine SupabaseTable Konfiguration
+})
+
+const saver = new SupabaseCheckpointSaver(checkpointsTable)
+```
+
+Typischer Einsatz:
+
+```ts
+import { MemoryChain } from "@delofarag/ai-utils"
+
+const memoryChain = new MemoryChain({
+    prompt: "Du bist ein Support Assistant.",
+    memory: saver
+})
+```
+
+---
+
+## RAG Utilities (Detail)
+
+### Vector Stores
+
+- `createRAMVectoreStore(data)`
+- `createSupabaseVectoreStore(data, config?)`
+- `getSupabaseVectorStore(config?)`
+- `createFaissStore(data, config?)`
+- `loadFaissStore({ path })`
+- `turn_to_docs(data)`
+
+### RAG Chain
+
+- `createRAGChain({ vectorStore, llm, prompt?, num_of_results_from_vdb? })`
+
+### RAG Tool
+
+- `createRAGTool({ vectorStore, name, description })`
+
+```ts
+import { createRAGTool, createFaissStore } from "@delofarag/ai-utils"
+
+const vectorStore = await createFaissStore(["FAQ 1", "FAQ 2"])
+const ragTool = createRAGTool({
+    vectorStore,
+    name: "search_faq",
+    description: "Sucht in FAQ-Dokumenten"
+})
+```
 
 ---
 
 ## Magic-Funcs
 
-Kleine, wiederverwendbare LLM-Funktionen. **Struktur:** Immer `{ llm?, ...params }` – `llm` optional, sonst Default (Groq).
-
 ### Answerers
-
-- **ask(question)** – Einfache Frage → Textantwort  
-- **websearch(query)** – Sucht im Web (Tavily), braucht `TAVILY_API_KEY`
+- `ask({ question, llm? })`
+- `websearch(query)` (braucht `TAVILY_API_KEY`)
 
 ### Evaluators
-
-- **classify({ data, classes, context? })** – Ordnet Input einer von mehreren Klassen zu  
-- **decide({ material, kriteria_to_decide })** – Ja/Nein/Unclear plus Begründung
+- `classify({ data, classes, context?, llm? })`
+- `decide({ material, kriteria_to_decide, llm? })`
 
 ### Parsers
-
-- **extract({ data, schema, goal? })** – Extrahiert strukturierte Daten gemäß Zod-Schema  
-- **structure({ data, into, retries? })** – Formatiert beliebigen Input in ein Zod-Schema  
-- **rewrite({ data, instruction })** – Transformiert Text nach Anweisung  
-- **summarize({ data, fokuss?, maxWords? })** – Fasst zusammen
+- `extract({ data, schema, goal?, llm? })`
+- `structure({ data, into, retries?, llm? })`
+- `rewrite({ data, instruction, llm? })`
+- `summarize({ data, fokuss?, maxWords?, llm? })`
 
 ### Optimizers
+- `promptify({ request, agentRole?, llm? })`
+- `ragify({ data, llm? })`
 
-- **promptify({ request, agentRole? })** – Erzeugt System-Prompts aus Nutzeranfragen  
-- **ragify({ data })** – Optimiert Text für RAG (strukturierter, informationsdicht)
-
-**Beispiel – immer gleiche Struktur:**
+Beispiel:
 
 ```ts
 import { classify, extract, summarize } from "@delofarag/ai-utils"
 import { z } from "zod/v3"
 
-const klasse = await classify({
-    data: "Produktbewertung: Tolle Qualität!",
+const sentiment = await classify({
+    data: "Das Produkt ist wirklich gut.",
     classes: ["positiv", "negativ", "neutral"] as const
 })
 
-const infos = await extract({
-    data: "Max, 30 Jahre, Berlin",
-    schema: z.object({ name: z.string(), alter: z.number(), stadt: z.string() })
+const person = await extract({
+    data: "Max ist 30 und lebt in Berlin.",
+    schema: z.object({
+        name: z.string(),
+        age: z.number(),
+        city: z.string()
+    })
 })
 
-const kurz = await summarize({ data: langerText, maxWords: 50 })
+const short = await summarize({
+    data: "Sehr langer Text...",
+    maxWords: 50
+})
 ```
 
 ---
 
-## RAG-Implementierungen
+## Modalities
 
-**Vector Stores** (in `rag.ts`):
+### STT
 
-- **turn_to_docs(data)** – Wandelt Strings/Objekte in LangChain-`Document[]` um
-- **createSupabaseVectoreStore({ supabase, data, table_name?, RPC_function? })** – Supabase Vector Store aus Daten
-- **getSupabaseVectorStore({ supabase, table_name?, RPC_function? })** – Bestehenden Store holen
-- **createFaissStore({ data, save_path?, embeddings? })** – FAISS-Store (lokal, speicherbar)
-- **loadFaissStore({ path, embeddings? })** – FAISS-Store laden
-
-**RAG als Tool** (für Agent):
-
-- **createRAGTool({ vectorStore, name, description })** – Erzeugt ein Tool, mit dem der Agent den Vector Store durchsucht. In `tools` übergeben oder via `agent.addTool()`.
-
-**Retrieval-Chains** (in `rag.ts`):
-
-- **createRAGChain({ vectorStore, llm, prompt?, num_of_results_from_vdb? })** – Retrieval-Chain
-- **createRAGChainFromRetriever({ retriever, llm, prompt? })** – Alternative mit eigenem Retriever
-
-**Typischer Ablauf:**
-
-1. Vector Store erstellen: `createFaissStore({ data })` oder `createSupabaseVectoreStore({ data })`
-2. **Chain/MemoryChain:** `chain.setContext(vectorStore)` – RAG wird automatisch eingebaut. Optional `chain.addContext(weitereDaten)` für weitere Docs
-3. **Agent/Chatbot:** `createRAGTool({ vectorStore, name, description })` als Tool übergeben
-
----
-
-## Memory: SupabaseCheckpointSaver & SmartCheckpointSaver
-
-### SupabaseCheckpointSaver
-
-Speichert Checkpoints (inkl. Konversationsverlauf) in einer Supabase-Tabelle. Für persistente Chats über Sessions hinweg.
+- `stt(...)`
+- `createSTTPhoneSocketSession(...)` fuer live phone socket chunks (Twilio/Telnyx-style)
 
 ```ts
-import { SupabaseCheckpointSaver, SupabaseCheckpointRow } from "@delofarag/ai-utils"
-import { SupabaseTable } from "@delofarag/supabase-utils"
+import { stt } from "@delofarag/ai-utils"
 
-const table = new SupabaseTable<SupabaseCheckpointRow>({ /* ... */ })
-const saver = new SupabaseCheckpointSaver(table)
-
-const memoryChain = new MemoryChain({
-    chain: myChain,
-    memory: saver
+const result = await stt({
+    audio: "./call.wav",
+    prompt: "Transcribe in German."
 })
 ```
 
-**Hinweis:** Noch unter Test – Tabellen-Schema muss zu den Checkpoint-Strukturen passen.
+### TTS
 
-### SmartCheckpointSaver
-
-Wrapper um einen anderen `BaseCheckpointSaver` (z.B. `MemorySaver` oder `SupabaseCheckpointSaver`). Führt automatisch **Summarization** durch:
-
-- Nach `messagesBeforeSummary` User/AI-Nachrichten (Default: 12) wird die Konversation zusammengefasst
-- Die Zusammenfassung ersetzt die alten Messages → weniger Tokens, längerer Kontext
-- `maxSummaries` (Default: 7): Maximal so viele Summaries werden behalten. Sobald eine neue erstellt würde und das Limit überschritten wäre, wird die älteste Summary gelöscht (Rolling-Window)
+- `tts(...)`
+- `streamTTSOverPhoneSocket(...)` fuer chunked outbound audio
 
 ```ts
-import { SmartCheckpointSaver, MemorySaver, getLLM } from "@delofarag/ai-utils"
+import { tts, streamTTSOverPhoneSocket } from "@delofarag/ai-utils"
 
-const llm = getLLM({ provider: "chatgroq", apikey: process.env.CHATGROQ_API_KEY! })
-const memory = new SmartCheckpointSaver(new MemorySaver(), {
-    llm,
-    messagesBeforeSummary: 12,
-    maxSummaries: 7,
+const speech = await tts({
+    text: "Willkommen beim Support.",
+    model: "nova"
 })
 
-const chatbot = new Chatbot({ llm, memory })
+await streamTTSOverPhoneSocket({
+    text: "Einen Moment bitte.",
+    model: "nova",
+    onChunk: async (chunk) => {
+        // socket send
+    }
+})
 ```
 
-**Warum so:** Lange Chats blähen den Kontext auf. SmartCheckpointSaver hält die wichtigsten Infos in Zusammenfassungen und reduziert Token-Verbrauch.
+### Vision
+
+```ts
+import { vision } from "@delofarag/ai-utils"
+
+const result = await vision({
+    prompt: "Was ist auf dem Bild zu sehen?",
+    images: ["https://example.com/photo.jpg"]
+})
+```
+
+### Image Generation
+
+```ts
+import { generateImages } from "@delofarag/ai-utils"
+
+const generated = await generateImages({
+    prompt: "Generate a clean product hero image",
+    imageConfig: { aspect_ratio: "16:9", image_size: "2K" }
+})
+```
 
 ---
 
-## Kurzüberblick
+## Session / Stream Helpers
 
-| Util | Zweck |
-|------|-------|
-| **Chain** | Stateless LLM + Schema, optional RAG (setContext/addContext) |
-| **MemoryChain** | Chain + Konversations-Memory pro thread_id, optional RAG |
-| **Agent** | LLM + Tools, optional Memory. RAG via createRAGTool + addTool |
-| **Chatbot** | Discriminated Union: tools → Agent, vectorStore → MemoryChain |
-| **ToolRegistry** | Tools registrieren (empfohlen) |
-| **tavilySearchTool** | Web-Suche (TAVILY_API_KEY) |
-| **Magic-Funcs** | ask, websearch, classify, decide, extract, structure, rewrite, summarize, promptify, ragify |
-| **RAG** | createRAGTool, Supabase/FAISS Vector Stores, createRAGChain |
-| **SupabaseCheckpointSaver** | Persistente Memory in Supabase |
-| **SmartCheckpointSaver** | Memory mit Auto-Summarization |
-| **getLLM()** | LLM aus Groq, OpenRouter oder Ollama |
+```ts
+import { session, StreamResponse } from "@delofarag/ai-utils"
+```
+
+- `session({ streamable, ... })`: CLI-like interactive loop
+- `StreamResponse(asyncIterable)`: streambares NDJSON-HTTP-Response-Objekt
 
 ---
 
-## .env-Variablen
+## Export Overview (high-level)
 
-| Variable | Verwendung |
-|----------|------------|
-| `CHATGROQ_API_KEY` | Default für alle LLM-Utils |
-| `TAVILY_API_KEY` | tavilySearchTool, websearch() |
+Top-level Exports decken u. a. ab:
+
+- Helpers (`helpers`, `memory`, `rag`, `llms`, `chatbot`)
+- Core (`Agent`, `Chain`, `MemoryChain`)
+- Tools (`ToolRegistry`, `Tavily`, `RAGTool`, Zodios registries)
+- Magic-Funcs (answerers/evaluators/parsers/optimizers)
+- Modalities (`stt`, `tts`, `vision`, `generateImages`)
+
+---
+
+## Empfehlungen
+
+- Fuer strukturierte Outputs immer `zod/v3` verwenden.
+- Fuer Produktion API-Keys als ENV setzen, nicht hardcoden.
+- Bei langen Chats `SmartCheckpointSaver` verwenden.
+- RAG als Tool im `Agent` ist in der Praxis oft robuster als RAG-only Prompting.

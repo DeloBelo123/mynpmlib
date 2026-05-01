@@ -18,7 +18,26 @@ function createClassificationSchema<T extends readonly [string, ...string[]]>(cl
     })
   }
   
-  export async function classify<T extends readonly [string, ...string[]]>({
+  /**
+   * Klassifiziert Input in genau eine vordefinierte Klasse und liefert Confidence + Begruendung.
+   *
+   * Sinnvoll fuer Routing, Labeling, Topic-Erkennung oder Vorentscheidungen in Flows.
+   *
+   * @param params.llm Optionales Chat-LLM.
+   * @param params.data Zu klassifizierender Input (String oder Objekt).
+   * @param params.classes Erlaubte Klassen als konstantes Tuple.
+   * @param params.context Optionaler Zusatzkontext fuer die Entscheidung.
+   * @returns Objekt mit `class`, `confidence` (0-100) und `reasoning`.
+   *
+   * @example
+   * ```ts
+   * const result = await classify({
+   *   data: "Der Kunde moechte kuendigen und ist unzufrieden.",
+   *   classes: ["support", "sales", "churn"] as const
+   * })
+   * ```
+   */
+  export async function classify<const T extends readonly [string, ...string[]]>({
     llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
     data,
     classes,
@@ -78,3 +97,4 @@ function createClassificationSchema<T extends readonly [string, ...string[]]>(cl
   
     return schema.parse(result)
   }
+

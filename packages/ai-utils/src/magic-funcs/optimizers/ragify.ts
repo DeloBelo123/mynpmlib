@@ -4,6 +4,22 @@ import { ChatPromptTemplate } from "../../imports"
 import { createSimpleChain } from "../../helpers/helpers"
 import { StringOutputParser } from "../../imports"
 
+/**
+ * Optimiert Input zu einem dichten, RAG-freundlichen Kontexttext.
+ *
+ * Sinnvoll vor Embedding/Indexing, um Redundanz zu reduzieren und Fakten klar zu strukturieren.
+ *
+ * @param params.llm Optionales Chat-LLM.
+ * @param params.data Rohtext, der fuer RAG optimiert werden soll.
+ * @returns Strukturierter Kontext als String.
+ *
+ * @example
+ * ```ts
+ * const context = await ragify({
+ *   data: "Langer Meeting- und Projektext mit vielen Wiederholungen..."
+ * })
+ * ```
+ */
 export async function ragify({
     llm = getLLM({ provider: "chatgroq", apikey: process.env.CHATGROQ_API_KEY ?? "" }),
     data,

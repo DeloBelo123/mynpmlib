@@ -20,7 +20,7 @@ import {
     ChatPromptTemplate
 } from "../imports"
 
-interface SupabaseCheckpointRow {
+export interface SupabaseCheckpointRow {
     thread_id: string
     checkpoint: Checkpoint
     metadata: CheckpointMetadata

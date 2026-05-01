@@ -4,6 +4,25 @@ import { BaseChatModel } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
 import { getLLM } from "../../helpers/llms"
 
+/**
+ * Schreibt Input nach einer konkreten Anweisung um.
+ *
+ * Sinnvoll fuer Stiltransformation, Formatumwandlung, Tonalitaetswechsel oder Reduktion.
+ *
+ * @param params.data Eingabedaten (String oder Objekt).
+ * @param params.instruction Konkrete Transformationsanweisung.
+ * @param params.llm Optionales Chat-LLM.
+ * @param params.retries Anzahl der Wiederholungen bei Fehlern.
+ * @returns Transformierter Output als String.
+ *
+ * @example
+ * ```ts
+ * const result = await rewrite({
+ *   data: "Bitte sehr freundlich schreiben.",
+ *   instruction: "Formuliere als kurze, professionelle E-Mail."
+ * })
+ * ```
+ */
 export async function rewrite({
   data,
   instruction,

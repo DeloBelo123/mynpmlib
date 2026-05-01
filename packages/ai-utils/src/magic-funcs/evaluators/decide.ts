@@ -21,6 +21,24 @@ const decideSchema = z.object({
       )
   })
   
+  /**
+   * Trifft eine strukturierte Ja/Nein/Unklar-Entscheidung fuer ein gegebenes Kriterium.
+   *
+   * Sinnvoll fuer Gate-Checks, Policy-Validierung oder automatische Freigabeentscheidungen.
+   *
+   * @param params.llm Optionales Chat-LLM.
+   * @param params.material Material/Datengrundlage fuer die Entscheidung.
+   * @param params.kriteria_to_decide Kriterium, nach dem entschieden werden soll.
+   * @returns Objekt mit `decision`, `reason` und `confidence`.
+   *
+   * @example
+   * ```ts
+   * const result = await decide({
+   *   material: "Der User hat AGB akzeptiert und Email bestaetigt.",
+   *   kriteria_to_decide: "Ist der User onboarding-ready?"
+   * })
+   * ```
+   */
   export async function decide({
     llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
     material,

@@ -5,6 +5,28 @@ import type { OutputSchema } from "../../heart/chain"
 import { z } from "zod/v3"
 import { getLLM } from "../../helpers/llms"
 
+/**
+ * Bringt beliebigen Input in ein vorgegebenes Zod-Schema.
+ *
+ * Sinnvoll wenn Modelloutput robust als JSON-Struktur benoetigt wird.
+ *
+ * @param params.data Rohdaten, die strukturiert werden sollen.
+ * @param params.into Ziel-Schema (`z.object(...)` oder `z.record(...)`).
+ * @param params.llm Optionales Chat-LLM.
+ * @param params.retries Anzahl der Wiederholungsversuche bei Parsing-Fehlern.
+ * @returns Valider, schema-konformer Output als `z.infer<T>`.
+ *
+ * @example
+ * ```ts
+ * const result = await structure({
+ *   data: "Titel: Demo, Prioritaet: hoch",
+ *   into: z.object({
+ *     title: z.string(),
+ *     priority: z.enum(["niedrig", "mittel", "hoch"])
+ *   })
+ * })
+ * ```
+ */
 export async function structure<T extends OutputSchema>({
     data,
     into,
