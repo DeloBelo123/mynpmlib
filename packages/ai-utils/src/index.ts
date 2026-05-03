@@ -1,7 +1,7 @@
 export * from "./helpers/helpers"
 export * from "./helpers/memory"
 export * from "./helpers/rag"
-export { DynamicStructuredTool } from "./imports"
+export { DynamicStructuredTool, MemorySaver } from "./imports"
 export * from "./heart/agent"
 export * from "./heart/chain"
 export * from "./heart/memorychain"

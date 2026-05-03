@@ -1,7 +1,7 @@
 import type { Zodios, ZodiosEndpointDescription, ApiOf } from "zodios"
 import { DynamicStructuredTool } from "../../../imports"
 import { z, type ZodTypeAny } from 'zod/v3'
-import { Prettify } from "../../../helpers/helpers"
+import type { Prettify } from "../../../helpers/llms"
 import type { ExtractToolNames } from "./CombinedRegistry"
 
 export type ZodiosEndpointWithAlias<R> = Prettify<ZodiosEndpointDescription<R> & {

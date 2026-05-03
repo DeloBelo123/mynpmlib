@@ -1,0 +1,1 @@
+mache ein pnpm {{update}} update bei der package {{package}} und veröffentliche .

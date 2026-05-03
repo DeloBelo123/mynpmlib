@@ -12,7 +12,7 @@ import {
     BaseChatModel,
     VectorStore,
     BaseRetriever
-} from "./imports"
+} from "../imports"
 import { SupabaseClient } from "@delofarag/supabase-utils"
 import { createClient } from "@supabase/supabase-js"
 
