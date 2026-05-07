@@ -235,12 +235,26 @@ type GroqLLMConfig =
   | { provider: "chatgroq"; type: "stt"; model?: ChatGroqSTTModel; apikey?: string }
   | { provider: "chatgroq"; type: "tts"; model?: ChatGroqTTSModel; apikey?: string }
 
+type OpenRouterLLMConfigBase = {
+  provider: "openrouter"
+  apikey?: string
+  /**
+   * Strengeres OpenRouter-Routing + EU-Endpunkt: `eu.openrouter.ai`, und im
+   * Request-Body `provider` wie in der OpenRouter-Doku (`data_collection`,
+   * `zdr` innerhalb von `provider` — nicht als Top-Level-Feld neben
+   * `provider`). LangChain `ChatOpenAI` reicht `modelKwargs` unverändert an
+   * die Chat-Completions-API durch (siehe `invocationParams` in
+   * `@langchain/openai`).
+   */
+  dataSafe?: boolean
+}
+
 type OpenRouterLLMConfig =
-  | { provider: "openrouter"; type?: undefined; model?: OpenRouterModel; apikey?: string }
-  | { provider: "openrouter"; type: "vision"; model?: OpenRouterVisionModel; apikey?: string }
-  | { provider: "openrouter"; type: "stt"; model?: OpenRouterSTTModel; apikey?: string }
-  | { provider: "openrouter"; type: "tts"; model?: OpenRouterTTSModel; apikey?: string }
-  | { provider: "openrouter"; type: "image-gen"; model?: OpenRouterImageGenModel; apikey?: string }
+  | (OpenRouterLLMConfigBase & { type?: undefined; model?: OpenRouterModel })
+  | (OpenRouterLLMConfigBase & { type: "vision"; model?: OpenRouterVisionModel })
+  | (OpenRouterLLMConfigBase & { type: "stt"; model?: OpenRouterSTTModel })
+  | (OpenRouterLLMConfigBase & { type: "tts"; model?: OpenRouterTTSModel })
+  | (OpenRouterLLMConfigBase & { type: "image-gen"; model?: OpenRouterImageGenModel })
 
 type LocalLLMConfig =
   | { provider: "local"; type?: undefined; model?: LocalModel }
@@ -280,7 +294,9 @@ export function getLLM(config: LLMConfig) {
       return new ChatOpenAI({
         apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
         configuration: {
-            baseURL: "https://openrouter.ai/api/v1",
+          baseURL: config.dataSafe
+            ? "https://eu.openrouter.ai/api/v1"
+            : "https://openrouter.ai/api/v1",
         },
         model: config.model ?? (
           type === "image-gen"
@@ -290,8 +306,19 @@ export function getLLM(config: LLMConfig) {
               : type === "tts"
                 ? "openai/gpt-4o-mini-tts-2025-12-15"
                 : "openai/gpt-5.4-mini"
-        )
-      });
+        ),
+        ...(config.dataSafe
+          ? {
+              modelKwargs: {
+                provider: {
+                  data_collection: "deny",
+                  zdr: true,
+                  allow_fallbacks: false,
+                },
+              },
+            }
+          : {}),
+      })
 
     case "local":
       return new ChatOllama({
