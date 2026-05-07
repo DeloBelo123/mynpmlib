@@ -40,7 +40,7 @@ async function main(){
         `,
         memory: new Smart(new RAM()),
         llm: getLLM({
-            type: "openrouter",
+            provider: "openrouter",
             model:"openai/gpt-5.4-mini"
         })
     })
