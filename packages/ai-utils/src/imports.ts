@@ -13,6 +13,7 @@ import { ChatOllama, OllamaEmbeddings } from '@langchain/ollama'
 import { ChatGroq } from '@langchain/groq'
 import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai'
 import { ChatAnthropic } from '@langchain/anthropic'
+import { ChatOpenRouter } from '@langchain/openrouter'
 
 // RAG: Vector Stores (Base Classes)
 import { VectorStore, SaveableVectorStore, VectorStoreRetriever } from '@langchain/core/vectorstores'
