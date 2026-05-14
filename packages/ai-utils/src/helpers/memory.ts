@@ -20,107 +20,130 @@ import {
     ChatPromptTemplate
 } from "../imports"
 
-/** Rolle für persistiertes Konversations-Log (LLM-übliche Literale). */
-export type ConversationFrom = "user" | "assistant"
+import {
+    ToolMessage,
+} from "@langchain/core/messages"
 
-/** Ein Eintrag im append-only Konversations-Log (`at` = ISO-8601, Postgres `timestamptz`-kompatibel). */
-export interface ConversationTurn {
-    from: ConversationFrom
-    at: string
-    content: string
-}
+
+/** Rolle einer Chat-Message im Checkpoint (Nach Json aus der DB oft Plain-Objects). */
+export type CheckpointChatRole = "human" | "ai" | "system" | "tool" | "other"
 
 export interface SupabaseCheckpointRow {
     thread_id: string
     checkpoint: Checkpoint
     metadata: CheckpointMetadata
-    /** Append-only Verlauf; in Supabase typisch als `jsonb` mit Default `[]`. */
-    conversation?: ConversationTurn[]
     created_at?: string
     updated_at?: string
 }
 
-function messageContentToString(message: BaseMessage): string {
-    const rawContent = (message as any).content ?? (message as any).kwargs?.content ?? ""
-    return typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent)
+/** Nachrichten-Channel aus einem gespeicherten Checkpoint (meist `channel_values.messages`). */
+export function getMessagesArrayFromCheckpoint(checkpoint: Checkpoint | undefined | null): unknown[] {
+    if (!checkpoint?.channel_values) return []
+    const msgs = (checkpoint.channel_values as Record<string, unknown>).messages
+    return Array.isArray(msgs) ? msgs : []
 }
 
-function conversationRoleFromMessage(message: BaseMessage): ConversationFrom | null {
-    if (message instanceof HumanMessage) return "user"
-    if (message instanceof AIMessage) return "assistant"
-    const rawMessage = message as any
-    const type = typeof rawMessage._getType === "function" ? rawMessage._getType() : rawMessage._getType
-    if (type === "human" || type === "user") return "user"
-    if (type === "ai" || type === "assistant") return "assistant"
-    const id = rawMessage.id?.[rawMessage.id.length - 1]
-    if (id === "HumanMessage") return "user"
-    if (id === "AIMessage" || id === "AIMessageChunk") return "assistant"
-    const role = rawMessage.role ?? rawMessage.kwargs?.role
-    if (role === "human" || role === "user") return "user"
-    if (role === "ai" || role === "assistant") return "assistant"
-    return null
+export function checkpointMessageBody(message: unknown): string {
+    if (message === null || message === undefined) return ""
+    const m = message as Record<string, unknown>
+    const rawContent =
+        m.content ??
+        (m.kwargs && typeof m.kwargs === "object"
+            ? (m.kwargs as Record<string, unknown>).content
+            : undefined) ??
+        ""
+    if (typeof rawContent === "string") return rawContent
+    if (Array.isArray(rawContent))
+        return rawContent
+            .map((part: unknown) =>
+                typeof part === "object" && part !== null && "text" in part
+                    ? String((part as { text?: unknown }).text ?? "")
+                    : JSON.stringify(part),
+            )
+            .join("")
+    return JSON.stringify(rawContent)
 }
 
-function turnsSkeletonFromMessages(messages: BaseMessage[]): Array<{ from: ConversationFrom; content: string }> {
-    const out: Array<{ from: ConversationFrom; content: string }> = []
-    for (const m of messages) {
-        const from = conversationRoleFromMessage(m)
-        if (from) out.push({ from, content: messageContentToString(m) })
-    }
-    return out
+/** Erkennung Human / AI / System / Tool — funktioniert mit LangChain-Klassen und serialisierten JSON-Objekten. */
+export function checkpointMessageRole(message: unknown): CheckpointChatRole {
+    if (message === null || message === undefined || typeof message !== "object") return "other"
+
+    const m = message as BaseMessage
+    if (m instanceof HumanMessage) return "human"
+    if (m instanceof AIMessage) return "ai"
+    if (m instanceof SystemMessage) return "system"
+    if (m instanceof ToolMessage) return "tool"
+
+    const raw = message as Record<string, unknown>
+    const kw = raw.kwargs && typeof raw.kwargs === "object" ? (raw.kwargs as Record<string, unknown>) : {}
+
+    const t =
+        typeof (raw as any)._getType === "function"
+            ? (raw as any)._getType()
+            : typeof raw.type === "string"
+              ? raw.type
+              : undefined
+    if (t === "human" || t === "user") return "human"
+    if (t === "ai" || t === "assistant") return "ai"
+    if (t === "system") return "system"
+    if (t === "tool") return "tool"
+
+    const idArr = raw.id as unknown
+    const idLast = Array.isArray(idArr) ? idArr[idArr.length - 1] : undefined
+    if (idLast === "HumanMessage") return "human"
+    if (idLast === "AIMessage" || idLast === "AIMessageChunk") return "ai"
+    if (idLast === "SystemMessage") return "system"
+    if (idLast === "ToolMessage") return "tool"
+
+    const role = (kw.role ?? raw.role) as string | undefined
+    if (role === "human" || role === "user") return "human"
+    if (role === "ai" || role === "assistant") return "ai"
+    if (role === "system") return "system"
+    if (role === "tool") return "tool"
+
+    return "other"
+}
+
+function checkpointToolDisplayName(message: unknown): string | undefined {
+    if (message === null || message === undefined || typeof message !== "object") return undefined
+    if (message instanceof ToolMessage) return message.name ?? undefined
+    const raw = message as Record<string, unknown>
+    const kw = raw.kwargs && typeof raw.kwargs === "object" ? (raw.kwargs as Record<string, unknown>) : {}
+    const name =
+        typeof raw.name === "string"
+            ? raw.name
+            : typeof kw.name === "string"
+              ? kw.name
+              : undefined
+    return name || undefined
 }
 
 /**
- * Hängt neue User/Assistant-Turns an, ohne bei Graph-Summaries / gekürztem State alte Log-Einträge zu verlieren:
- * längster Präfix von `ckSkeleton`, der mit dem Ende von `existing` übereinstimmt, dann Append des Rests.
+ * Für Prompts/System-Kontext: klare Labels, Reihenfolge wie im Checkpoint-Channel `messages`,
+ * ohne extra DB-Spalte `conversation`.
  */
-export function mergeAppendOnlyConversation(
-    existing: ConversationTurn[],
-    ckSkeleton: Array<{ from: ConversationFrom; content: string }>,
-): ConversationTurn[] {
-    if (ckSkeleton.length === 0) return [...existing]
-    const out = [...existing]
-    let bestJ = 0
-    const maxJ = Math.min(out.length, ckSkeleton.length)
-    for (let j = maxJ; j >= 0; j--) {
-        let ok = true
-        for (let i = 0; i < j; i++) {
-            const e = out[out.length - j + i]
-            const c = ckSkeleton[i]
-            if (!e || e.from !== c.from || e.content !== c.content) {
-                ok = false
-                break
-            }
-        }
-        if (ok) {
-            bestJ = j
-            break
-        }
+export function formatCheckpointMessagesForLLM(messages: unknown[]): string {
+    if (!messages.length) return ""
+    const blocks: string[] = []
+    for (const msg of messages) {
+        const role = checkpointMessageRole(msg)
+        const body = checkpointMessageBody(msg).trim()
+
+        let heading: string
+        if (role === "human") heading = "**User** (human message)"
+        else if (role === "ai") heading = "**Assistant** (AI message)"
+        else if (role === "system") heading = "**System**"
+        else if (role === "tool") {
+            const toolName = checkpointToolDisplayName(msg)
+            heading = toolName ? `**Tool**: \`${toolName}\`` : "**Tool result**"
+        } else heading = "**Other / unknown role**"
+
+        if (!body) continue
+        blocks.push(`${heading}\n\n${body}`)
     }
-    const baseTime = Date.now()
-    const toAppend = ckSkeleton.slice(bestJ)
-    for (let k = 0; k < toAppend.length; k++) {
-        out.push({
-            from: toAppend[k].from,
-            content: toAppend[k].content,
-            at: new Date(baseTime + k).toISOString(),
-        })
-    }
-    return out
+    return blocks.join("\n\n---\n\n")
 }
 
-/**
- * Baut aus DB-`conversation`-Rows einen klaren Mehrzeiler für Prompts (chronologisch wie im Array).
- */
-export function formatConversationForLLM(turns: ConversationTurn[]): string {
-    if (!turns.length) return ""
-    return turns
-        .map((t) => {
-            const label = t.from === "user" ? "User" : "Assistant"
-            return `[${t.at}] ${label}:\n${t.content}`
-        })
-        .join("\n\n")
-}
 
 /**
  * needs testing!!!
@@ -133,19 +156,21 @@ export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
         this.table = supabaseTable
     }
 
-    async getConversation(threadId: string): Promise<ConversationTurn[]> {
+    /** Messages aus gespeicherter `checkpoint`-Spalte (`channel_values.messages`). */
+    async getCheckpointMessages(threadId: string): Promise<unknown[]> {
         const rows = await this.table.select({
-            columns: ["conversation"],
+            columns: ["checkpoint"],
             where: [{ column: "thread_id", is: threadId }],
             limited_to: 1,
         })
-        const raw = rows[0]?.conversation
-        return Array.isArray(raw) ? (raw as ConversationTurn[]) : []
+        const ck = rows[0]?.checkpoint as Checkpoint | undefined
+        return getMessagesArrayFromCheckpoint(ck)
     }
 
+    /** Lesbarer Kontext für Prompts (aus Checkpoint, keine `conversation`-Spalte). */
     async getConversationAsLLMContext(threadId: string): Promise<string> {
-        const turns = await this.getConversation(threadId)
-        return formatConversationForLLM(turns)
+        const messages = await this.getCheckpointMessages(threadId)
+        return formatCheckpointMessagesForLLM(messages)
     }
     
     async put(
@@ -154,39 +179,39 @@ export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
         metadata: CheckpointMetadata,
         newVersions: ChannelVersions,
     ): Promise<RunnableConfig> {
+        if (!checkpoint) return config
         const threadId = config.configurable?.thread_id || "default"
         const now = new Date().toISOString()
         
         const existingRows = await this.table.select({
-            columns: ["created_at", "conversation"],
+            columns: ["created_at"],
             where: [{ column: "thread_id", is: threadId }],
             limited_to: 1,
         })
         const existing = existingRows[0]
 
         const createdAt = existing?.created_at || now
-        const prevConversation = Array.isArray(existing?.conversation)
-            ? (existing.conversation as ConversationTurn[])
-            : []
-
-        const channelValues = checkpoint.channel_values || {}
-        const messages = (channelValues.messages as BaseMessage[]) || []
-        const skeleton = turnsSkeletonFromMessages(messages)
-        const conversation = mergeAppendOnlyConversation(prevConversation, skeleton)
         
         await this.table.upsert({
             where: [{ column: "thread_id", is: threadId }],
             upsert: {
                 checkpoint: checkpoint,
                 metadata: metadata,
-                conversation,
                 created_at: createdAt,
                 updated_at: now,
             },
             onConflict: "thread_id",
         })
-        
-        return config
+
+        const checkpoint_ns = config.configurable?.checkpoint_ns ?? ""
+
+        return {
+            configurable: {
+                thread_id: threadId,
+                checkpoint_ns,
+                checkpoint_id: checkpoint.id,
+            },
+        }
     }
     
     async get(config: LangGraphRunnableConfig): Promise<Checkpoint | undefined> {
@@ -206,12 +231,26 @@ export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
         if (!threadId) return
         
         const data = await this.table.select({
-            columns: ["checkpoint"],
-            where: [{ column: "thread_id", is: threadId }]
+            columns: ["checkpoint", "metadata"],
+            where: [{ column: "thread_id", is: threadId }],
         })
-        
+
+        const checkpoint_ns = config.configurable?.checkpoint_ns ?? ""
+
         for (const row of data || []) {
-            yield [config, row.checkpoint] as unknown as CheckpointTuple
+            const ckpt = row.checkpoint as Checkpoint | undefined
+            if (!ckpt) continue
+            yield {
+                config: {
+                    configurable: {
+                        thread_id: threadId,
+                        checkpoint_ns,
+                        checkpoint_id: ckpt.id,
+                    },
+                },
+                checkpoint: ckpt,
+                metadata: (row.metadata ?? {}) as CheckpointMetadata,
+            }
         }
     }
     
@@ -224,18 +263,35 @@ export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
     }
     
     async getTuple(config: LangGraphRunnableConfig): Promise<CheckpointTuple | undefined> {
-        const checkpoint = await this.get(config)
+        const threadId = config.configurable?.thread_id || "default"
+        const checkpoint_ns = config.configurable?.checkpoint_ns ?? ""
+
+        const rows = await this.table.select({
+            columns: ["checkpoint", "metadata"],
+            where: [{ column: "thread_id", is: threadId }],
+            limited_to: 1,
+        })
+        const row = rows[0]
+        const checkpoint = row?.checkpoint as Checkpoint | undefined
         if (!checkpoint) return undefined
-        return [config, checkpoint] as unknown as CheckpointTuple
+
+        return {
+            config: {
+                configurable: {
+                    thread_id: threadId,
+                    checkpoint_ns,
+                    checkpoint_id: checkpoint.id,
+                },
+            },
+            checkpoint,
+            metadata: (row.metadata ?? {}) as CheckpointMetadata,
+        }
     }
     
-    async putWrites(config: RunnableConfig, writes: PendingWrite[], taskId: string): Promise<void> {
-        for (const write of writes) {
-            const checkpoint = (write as any).checkpoint as Checkpoint
-            const metadata = (write as any).metadata as CheckpointMetadata
-            const versions = (checkpoint?.channel_versions ?? {}) as ChannelVersions
-            await this.put(config as LangGraphRunnableConfig, checkpoint, metadata, versions)
-        }
+    async putWrites(_config: RunnableConfig, _writes: PendingWrite[], _taskId: string): Promise<void> {
+        // pending writes brauchen wir nicht separat zu persistieren -
+        // der finale Checkpoint kommt sowieso über put() rein
+        return
     }
     
     async deleteThread(threadId: string): Promise<void> {
@@ -296,32 +352,13 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
     }
     
     private getMessageRole(message: BaseMessage): "human" | "ai" | "system" | "other" {
-        if (message instanceof HumanMessage) return "human"
-        if (message instanceof AIMessage) return "ai"
-        if (message instanceof SystemMessage) return "system"
-
-        const rawMessage = message as any
-        const type = typeof rawMessage._getType === "function" ? rawMessage._getType() : rawMessage._getType
-        if (type === "human" || type === "user") return "human"
-        if (type === "ai" || type === "assistant") return "ai"
-        if (type === "system") return "system"
-
-        const id = rawMessage.id?.[rawMessage.id.length - 1]
-        if (id === "HumanMessage") return "human"
-        if (id === "AIMessage" || id === "AIMessageChunk") return "ai"
-        if (id === "SystemMessage") return "system"
-
-        const role = rawMessage.role ?? rawMessage.kwargs?.role
-        if (role === "human" || role === "user") return "human"
-        if (role === "ai" || role === "assistant") return "ai"
-        if (role === "system") return "system"
-
-        return "other"
+        const r = checkpointMessageRole(message)
+        if (r === "tool" || r === "other") return "other"
+        return r
     }
 
     private getMessageContent(message: BaseMessage): string {
-        const rawContent = (message as any).content ?? (message as any).kwargs?.content ?? ""
-        return typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent)
+        return checkpointMessageBody(message)
     }
 
     /**

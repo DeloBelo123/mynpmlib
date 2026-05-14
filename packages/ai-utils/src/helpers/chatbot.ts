@@ -1,9 +1,8 @@
 import { input } from "@delofarag/base-utils/server"
 import { logChunk } from "./helpers"
 import type { Agent } from "../heart/agent"
-import type { MemoryChain } from "../heart/memorychain"
 
-type SessionStreamable = Agent<any> | MemoryChain<any>
+type SessionStreamable = Agent<any>
 
 type SessionProps = {
     streamable: SessionStreamable
@@ -13,8 +12,7 @@ type SessionProps = {
 }
 
 /** 
- * die session funktion für ein streamable, wird hauptsächlich für testing eines agenten/memorychains verwendet
- * (diese 2 sind die einzigen Streamables die es gibt)
+ * die session funktion für ein streamable, wird hauptsächlich für testing eines agenten verwendet
  * @param streamable das streamable welches die session führt
  * @param breakword das wort welches die session beendet
  * @param numberOfMessages die maximale anzahl von messages welche die session senden kann
