@@ -20,12 +20,106 @@ import {
     ChatPromptTemplate
 } from "../imports"
 
+/** Rolle für persistiertes Konversations-Log (LLM-übliche Literale). */
+export type ConversationFrom = "user" | "assistant"
+
+/** Ein Eintrag im append-only Konversations-Log (`at` = ISO-8601, Postgres `timestamptz`-kompatibel). */
+export interface ConversationTurn {
+    from: ConversationFrom
+    at: string
+    content: string
+}
+
 export interface SupabaseCheckpointRow {
     thread_id: string
     checkpoint: Checkpoint
     metadata: CheckpointMetadata
+    /** Append-only Verlauf; in Supabase typisch als `jsonb` mit Default `[]`. */
+    conversation?: ConversationTurn[]
     created_at?: string
     updated_at?: string
+}
+
+function messageContentToString(message: BaseMessage): string {
+    const rawContent = (message as any).content ?? (message as any).kwargs?.content ?? ""
+    return typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent)
+}
+
+function conversationRoleFromMessage(message: BaseMessage): ConversationFrom | null {
+    if (message instanceof HumanMessage) return "user"
+    if (message instanceof AIMessage) return "assistant"
+    const rawMessage = message as any
+    const type = typeof rawMessage._getType === "function" ? rawMessage._getType() : rawMessage._getType
+    if (type === "human" || type === "user") return "user"
+    if (type === "ai" || type === "assistant") return "assistant"
+    const id = rawMessage.id?.[rawMessage.id.length - 1]
+    if (id === "HumanMessage") return "user"
+    if (id === "AIMessage" || id === "AIMessageChunk") return "assistant"
+    const role = rawMessage.role ?? rawMessage.kwargs?.role
+    if (role === "human" || role === "user") return "user"
+    if (role === "ai" || role === "assistant") return "assistant"
+    return null
+}
+
+function turnsSkeletonFromMessages(messages: BaseMessage[]): Array<{ from: ConversationFrom; content: string }> {
+    const out: Array<{ from: ConversationFrom; content: string }> = []
+    for (const m of messages) {
+        const from = conversationRoleFromMessage(m)
+        if (from) out.push({ from, content: messageContentToString(m) })
+    }
+    return out
+}
+
+/**
+ * Hängt neue User/Assistant-Turns an, ohne bei Graph-Summaries / gekürztem State alte Log-Einträge zu verlieren:
+ * längster Präfix von `ckSkeleton`, der mit dem Ende von `existing` übereinstimmt, dann Append des Rests.
+ */
+export function mergeAppendOnlyConversation(
+    existing: ConversationTurn[],
+    ckSkeleton: Array<{ from: ConversationFrom; content: string }>,
+): ConversationTurn[] {
+    if (ckSkeleton.length === 0) return [...existing]
+    const out = [...existing]
+    let bestJ = 0
+    const maxJ = Math.min(out.length, ckSkeleton.length)
+    for (let j = maxJ; j >= 0; j--) {
+        let ok = true
+        for (let i = 0; i < j; i++) {
+            const e = out[out.length - j + i]
+            const c = ckSkeleton[i]
+            if (!e || e.from !== c.from || e.content !== c.content) {
+                ok = false
+                break
+            }
+        }
+        if (ok) {
+            bestJ = j
+            break
+        }
+    }
+    const baseTime = Date.now()
+    const toAppend = ckSkeleton.slice(bestJ)
+    for (let k = 0; k < toAppend.length; k++) {
+        out.push({
+            from: toAppend[k].from,
+            content: toAppend[k].content,
+            at: new Date(baseTime + k).toISOString(),
+        })
+    }
+    return out
+}
+
+/**
+ * Baut aus DB-`conversation`-Rows einen klaren Mehrzeiler für Prompts (chronologisch wie im Array).
+ */
+export function formatConversationForLLM(turns: ConversationTurn[]): string {
+    if (!turns.length) return ""
+    return turns
+        .map((t) => {
+            const label = t.from === "user" ? "User" : "Assistant"
+            return `[${t.at}] ${label}:\n${t.content}`
+        })
+        .join("\n\n")
 }
 
 /**
@@ -33,36 +127,63 @@ export interface SupabaseCheckpointRow {
  */
 export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
     private table: SupabaseTable<SupabaseCheckpointRow>
-    
+
     constructor(supabaseTable: SupabaseTable<SupabaseCheckpointRow>) {
         super()
         this.table = supabaseTable
     }
+
+    async getConversation(threadId: string): Promise<ConversationTurn[]> {
+        const rows = await this.table.select({
+            columns: ["conversation"],
+            where: [{ column: "thread_id", is: threadId }],
+            limited_to: 1,
+        })
+        const raw = rows[0]?.conversation
+        return Array.isArray(raw) ? (raw as ConversationTurn[]) : []
+    }
+
+    async getConversationAsLLMContext(threadId: string): Promise<string> {
+        const turns = await this.getConversation(threadId)
+        return formatConversationForLLM(turns)
+    }
     
-    async put(config: LangGraphRunnableConfig, checkpoint: Checkpoint, metadata: CheckpointMetadata): Promise<RunnableConfig> {
+    async put(
+        config: LangGraphRunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        newVersions: ChannelVersions,
+    ): Promise<RunnableConfig> {
         const threadId = config.configurable?.thread_id || "default"
         const now = new Date().toISOString()
         
-        // Prüfe ob Checkpoint bereits existiert um created_at zu behalten
         const existingRows = await this.table.select({
-            columns: ["created_at"],
+            columns: ["created_at", "conversation"],
             where: [{ column: "thread_id", is: threadId }],
             limited_to: 1,
         })
         const existing = existingRows[0]
 
-        // Behalte created_at wenn bereits vorhanden, sonst setze jetzt
         const createdAt = existing?.created_at || now
+        const prevConversation = Array.isArray(existing?.conversation)
+            ? (existing.conversation as ConversationTurn[])
+            : []
+
+        const channelValues = checkpoint.channel_values || {}
+        const messages = (channelValues.messages as BaseMessage[]) || []
+        const skeleton = turnsSkeletonFromMessages(messages)
+        const conversation = mergeAppendOnlyConversation(prevConversation, skeleton)
         
         await this.table.upsert({
             where: [{ column: "thread_id", is: threadId }],
             upsert: {
                 checkpoint: checkpoint,
                 metadata: metadata,
+                conversation,
                 created_at: createdAt,
-                updated_at: now
+                updated_at: now,
             },
-            onConflict: "thread_id"
+            onConflict: "thread_id",
         })
         
         return config
@@ -112,7 +233,8 @@ export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
         for (const write of writes) {
             const checkpoint = (write as any).checkpoint as Checkpoint
             const metadata = (write as any).metadata as CheckpointMetadata
-            await this.put(config as LangGraphRunnableConfig, checkpoint, metadata)
+            const versions = (checkpoint?.channel_versions ?? {}) as ChannelVersions
+            await this.put(config as LangGraphRunnableConfig, checkpoint, metadata, versions)
         }
     }
     
