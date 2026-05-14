@@ -89,7 +89,7 @@ export class Agent<T extends OutputSchema | undefined = undefined> {
                 return p // weil wenn es kein string ist muss es ein MessagePlaceholder sein
             }
         }) : []
-        this.prompt.push(["system",`WICHTIG: 
+        this.prompt.push(["system",`WICHTIG:
             - Nutze Tools NUR wenn nötig
             - Nach jedem Tool-Call: Prüfe ob du die vollständige Antwort hast oder ob du noch weitere Tools brauchst
             - Wenn du die vollständige Antwort hast, gib sie direkt zurück und rufe keine weiteren Tools auf

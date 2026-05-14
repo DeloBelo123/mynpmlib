@@ -37,8 +37,6 @@ interface ChainProps<T extends OutputSchema>{
 }
 
 /**
- * @deprecated use agent instead
- * 
  * CONSTRUCTOR:
  * @example 
  * constructor({
