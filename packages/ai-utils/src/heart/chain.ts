@@ -75,7 +75,7 @@ export class Chain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> {
     }:ChainProps<T> = {}){
         this.prompt = typeof prompt === "string" ? [["system", prompt]] : Array.isArray(prompt) ? prompt.map((p:string | MessagesPlaceholder<any>)=>{
             if(typeof p === "string"){
-                return ["system", p]
+                return ["system", p];
             } else {
                 return p // weil wenn es kein string ist dann ist es ein MessagePlaceholder, sonst ist jeder string prompt ein system prompt, humanprompts geben nur wir
             }
