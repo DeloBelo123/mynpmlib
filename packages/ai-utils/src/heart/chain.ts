@@ -205,7 +205,7 @@ export class Chain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> {
     public clearContext(){
         this.vectorStore = undefined
         this.times_of_added_context = 0
-        console.log("Context cleared")
+        console.log("Context cleared");
     }
 }
 
