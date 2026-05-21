@@ -83,7 +83,7 @@ export class Chain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> {
         this.vectorStore = vectorStore
         this.llm = llm
         this.output = output
-        this.parser = StructuredOutputParser.fromZodSchema(this.output)
+        this.parser = StructuredOutputParser.fromZodSchema(this.output);
     }
 
     public async invoke(input: InvokeInputBase): Promise<z.infer<T>> {
