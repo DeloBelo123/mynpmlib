@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server"
 import { SupabaseTable } from "@delofarag/supabase-utils"
-import { z } from "zod"
+import { z } from "zod/v4"
 
 // Product Types
 export interface Product {

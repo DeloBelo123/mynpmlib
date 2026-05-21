@@ -1,6 +1,6 @@
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { Tool } from "./ToolRegistry";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 type TavilyTopic = "general" | "news" | "finance";
 type TavilySearchDepth = "basic" | "advanced";

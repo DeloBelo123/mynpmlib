@@ -9,11 +9,11 @@ import {
     createStuffDocumentsChain,
 } from "../imports"
 import { turn_to_docs, baseSplitter } from "../helpers/rag"
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 import { getLLM } from "../helpers/llms"
 
-/** Output-Schema für .invoke(): z.object() oder z.record() (Zod v3). */
-export type OutputSchema = z.ZodObject<any, any, any> | z.ZodRecord<any, any>
+/** Output-Schema für .invoke(): z.object() oder z.record() (Zod v4). */
+export type OutputSchema = z.ZodObject | z.ZodRecord
 
 export const DEFAULT_OUTPUT_SCHEMA = z.object({ 
     output: z.string().describe("Dein Output zur anfrage des Users") 
@@ -120,13 +120,13 @@ export class Chain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> {
             })
             if (debug) console.log("created retrieval chain")
             const respo = await chain.invoke({ input: JSON.stringify(dynamicFields), ...invokeInput })
-            return this.output.parse(respo.answer)
+            return this.output.parse(respo.answer) as z.infer<T>
         }
         
         const chain = true_prompt.pipe(this.llm).pipe(this.parser)
         if (debug) console.log("created normal chain")
         const respo = await chain.invoke(invokeInput)
-        return this.output.parse(respo) 
+        return this.output.parse(respo) as z.infer<T>
     }
 
 

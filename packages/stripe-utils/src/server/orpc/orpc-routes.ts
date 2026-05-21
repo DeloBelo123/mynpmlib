@@ -1,6 +1,6 @@
 import { os, ORPCError } from "@orpc/server"
 import type { StripeHandler } from "../server"
-import { z } from "zod"
+import { z } from "zod/v4"
 import { getUser } from "@delofarag/supabase-utils/server"
 
 const base = os.$context<{ stripeHandler: StripeHandler }>()

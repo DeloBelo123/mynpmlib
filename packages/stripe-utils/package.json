@@ -31,7 +31,7 @@
     "@stripe/stripe-js": "^2.4.0",
     "axios": "^1.6.0",
     "stripe": ">=14",
-    "zod": "^3.25.76"
+    "zod": "^4.3.6"
   },
   "peerDependencies": {
     "next": ">=14"

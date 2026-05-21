@@ -38,6 +38,26 @@ import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite'
 import { type Checkpoint, type CheckpointMetadata, type LangGraphRunnableConfig } from "@langchain/langgraph"
 import type { CheckpointTuple, CheckpointListOptions, PendingWrite, ChannelVersions } from "@langchain/langgraph-checkpoint"
 
+// DeepAgents package
+import { createDeepAgent } from "deepagents"
+import {
+    StateBackend,
+    StoreBackend,
+    FilesystemBackend,
+    LocalShellBackend,
+    CompositeBackend,
+    type CreateDeepAgentParams,
+    type DeepAgent as DeepAgentInterface,
+  } from "deepagents";
+
+import { InMemoryStore } from "@langchain/langgraph";
+import type { BaseStore } from "@langchain/langgraph";
+import { createMiddleware } from "langchain";
+import type { AgentMiddleware } from "langchain";
+
+import { DenoSandbox } from "@langchain/deno";
+import { DaytonaSandbox } from "@langchain/daytona";
+
 import { z } from 'zod'
 
 // Core
@@ -96,6 +116,7 @@ export {
 // Agents
 export {
     createReactAgent,
+    createDeepAgent,
     ToolNode,
     MemorySaver,
     BaseCheckpointSaver,
@@ -117,6 +138,31 @@ export {
     type CheckpointListOptions,
     type PendingWrite,
     type ChannelVersions,
+}
+
+// DeepAgents package, Backends
+export {
+    StateBackend,
+    StoreBackend,
+    FilesystemBackend,
+    LocalShellBackend,
+    CompositeBackend,
+}
+
+// DeepAgents package, Utils
+export {
+    createMiddleware,
+    type AgentMiddleware,
+    InMemoryStore,
+    type BaseStore,
+    type CreateDeepAgentParams,
+    type DeepAgentInterface,
+}
+
+// Sandboxes
+export {
+    DenoSandbox,
+    DaytonaSandbox,
 }
 
 // Utils

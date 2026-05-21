@@ -1,4 +1,4 @@
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 import { PromptTemplate } from "@langchain/core/prompts"
 import type { InvokeInputBase, OutputSchema } from "./chain"
 import { DynamicStructuredTool} from "../imports"

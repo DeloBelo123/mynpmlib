@@ -1,4 +1,4 @@
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 import { ToolRegistry, type Tool } from "../ToolRegistry"
 import { ZodiosToolRegistry } from "./ZodiosToolRegistry"
 import { DynamicStructuredTool } from "@langchain/core/tools"

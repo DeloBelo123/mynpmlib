@@ -90,7 +90,7 @@ Stateless LLM-Chain fuer strukturierte Ergebnisse.
 
 ```ts
 import { Chain, getLLM } from "@delofarag/ai-utils"
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 
 const productBriefSchema = z.object({
     title: z.string().describe("Kurzer Produktname"),
@@ -115,7 +115,7 @@ const result = await chain.invoke({
 
 ```ts
 import { Chain, createFaissStore } from "@delofarag/ai-utils"
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 
 const vectorStore = await createFaissStore(["Dokument A", "Dokument B"])
 
@@ -154,7 +154,7 @@ const r2 = await memoryChain.invoke({ thread_id: "u1", input: "Wie heisse ich?" 
 
 ```ts
 import { MemoryChain, createFaissStore } from "@delofarag/ai-utils"
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 
 const vectorStore = await createFaissStore(["Policy A", "Policy B"])
 
@@ -180,7 +180,7 @@ Tool-using Agent auf Basis von `createReactAgent`.
 
 ```ts
 import { Agent, ToolRegistry, getLLM } from "@delofarag/ai-utils"
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 
 const tools = new ToolRegistry([
     {
@@ -239,7 +239,7 @@ const agent = new Agent({
 
 ```ts
 import { ToolRegistry } from "@delofarag/ai-utils"
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 
 const registry = new ToolRegistry([
     {
@@ -390,7 +390,7 @@ Beispiel:
 
 ```ts
 import { classify, extract, summarize } from "@delofarag/ai-utils"
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 
 const sentiment = await classify({
     data: "Das Produkt ist wirklich gut.",
@@ -501,7 +501,7 @@ Top-level Exports decken u. a. ab:
 
 ## Empfehlungen
 
-- Fuer strukturierte Outputs immer `zod/v3` verwenden.
+- Fuer strukturierte Outputs immer `zod/v4` verwenden.
 - Fuer Produktion API-Keys als ENV setzen, nicht hardcoden.
 - Bei langen Chats `SmartCheckpointSaver` verwenden.
 - RAG als Tool im `Agent` ist in der Praxis oft robuster als RAG-only Prompting.

@@ -1,6 +1,6 @@
 import { DynamicStructuredTool } from "@langchain/core/tools"
 import { VectorStore } from "@langchain/core/vectorstores"
-import z from "zod/v3"
+import { z } from "zod/v4"
 
 export interface RAGProps {
     vectorStore: VectorStore

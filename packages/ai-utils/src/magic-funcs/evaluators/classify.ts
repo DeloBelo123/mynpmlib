@@ -1,7 +1,7 @@
 import { createSimpleChain } from "../../helpers/helpers"
 import { BaseChatModel } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 
 import { StructuredOutputParser } from "../../imports"
 import { getLLM } from "../../helpers/llms"

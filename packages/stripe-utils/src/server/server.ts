@@ -307,7 +307,7 @@ export class StripeHandler<T extends StripeTable = StripeTable> {
         try {
             const users = await this.dataTable.select({
                 columns: ["id" as keyof T],
-                where: [{column: "stripe_id" as keyof T, is: stripeCustomerId}]
+                where: [{column: "stripe_id" as keyof T, is: stripeCustomerId as T[keyof T]}]
             })
             if (users && users.length > 0) {
                 return (users[0] as any).id as string

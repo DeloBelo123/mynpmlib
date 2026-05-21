@@ -1,11 +1,11 @@
 import { DynamicStructuredTool } from "@langchain/core/tools"
 import type { ExtractToolNames } from "./zodios/CombinedRegistry"
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 
 export interface Tool {
     name:string
     description:string
-    schema:z.ZodObject<any,any>
+    schema:z.ZodObject
     func:(input: any) => any
 }
 

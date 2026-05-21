@@ -1,5 +1,5 @@
 import { BaseChatModel, BaseOutputParser, ChatPromptTemplate, StructuredOutputParser } from "../imports";
-import { z } from "zod/v3";
+import { z } from "zod/v4";
 
 export function logChunk(chunk: string) {
   const flushed = process.stdout.write(chunk)
@@ -40,7 +40,7 @@ export async function *stream(text:string | Array<any>,wait_in_between:number = 
  * @param zodschema - The Zod schema to parse the output
  * @returns An object containing the prompt and parser
  */
-export function outputschema(zodschema: z.ZodObject<any>): {
+export function outputschema(zodschema: z.ZodObject): {
   prompt: string
   parser: StructuredOutputParser<any>
 } {

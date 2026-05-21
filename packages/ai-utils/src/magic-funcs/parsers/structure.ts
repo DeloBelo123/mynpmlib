@@ -2,7 +2,7 @@ import { createSimpleChain } from "../../helpers/helpers"
 import { BaseChatModel, StructuredOutputParser } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
 import type { OutputSchema } from "../../heart/chain"
-import { z } from "zod/v3"
+import { z } from "zod/v4"
 import { getLLM } from "../../helpers/llms"
 
 /**
@@ -58,7 +58,7 @@ export async function structure<T extends OutputSchema>({
     for (let i = 0; i <= retries; i++) {
         try {
             const result = await chain.invoke({ input: inputString })
-            return into.parse(result)
+            return into.parse(result) as z.infer<T>
         } catch (error) {
             lastError = error as Error
             if (i < retries) {
