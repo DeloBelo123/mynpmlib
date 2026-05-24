@@ -5,7 +5,7 @@ Utilities for working with Supabase in Node.js and browser environments.
 ## Installation
 
 ```bash
-npm install @my/supabase-utils
+npm install @delofarag/supabase-utils
 ```
 
 ## Usage
