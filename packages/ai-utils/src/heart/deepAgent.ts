@@ -7,6 +7,7 @@ import {
     BaseCheckpointSaver,
     createDeepAgent,
     HumanMessage,
+    MemorySaver,
     type AgentMiddleware,
     type BaseStore,
     type CreateDeepAgentParams,
@@ -96,8 +97,41 @@ function extractTextFromMessageChunk(chunk: unknown): string | undefined {
 }
 
 /**
- * DeepAgent mit typisiertem `interruptOn` — Keys = Filesystem-Tools + `tools[]` + optional `execute`.
- * Für Literal-Autocomplete bei Custom-Tools: `tools: [myTool] as const`.
+ constructor({
+        prompt = `Du bist ein hilfreicher Deep Agent.`,
+        llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
+        tools = [] as unknown as TTools,
+        output,
+        checkpointer = new MemorySaver(),
+        agentsMd,
+        subagents,
+        backend,
+        permissions,
+        skills,
+        middleware,
+        interruptOn,
+        store,
+        name,
+        contextSchema,
+    }: DeepAgentProps<T, TTools, TBackend, TInterruptOn> = {} as DeepAgentProps<T, TTools, TBackend, TInterruptOn>) {
+        this.prompt = typeof prompt === "string"
+            ? [["system", prompt]]
+            : prompt.map((p: string) => ["system", p] as ["system", string])
+        this.tools = tools
+        this.llm = llm
+        this.output = output
+        this.checkpointer = checkpointer
+        this.agentsMd = agentsMd
+        this.subagents = subagents
+        this.backend = backend
+        this.permissions = permissions
+        this.skills = skills
+        this.middleware = middleware
+        this.interruptOn = interruptOn as TInterruptOn
+        this.store = store
+        this.name = name
+        this.contextSchema = contextSchema
+    }
  */
 export class DeepAgent<
     T extends OutputSchema | undefined = undefined,
@@ -111,7 +145,7 @@ export class DeepAgent<
     private output: T | undefined
     private agent: any
     private agentCacheDirty = true
-    private checkpointer: BaseCheckpointSaver | boolean | undefined
+    private checkpointer: BaseCheckpointSaver | boolean
     private agentsMd: string[] | undefined
     private subagents: SubAgent[] | undefined
     private backend: TBackend | undefined
@@ -130,7 +164,7 @@ export class DeepAgent<
         llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
         tools = [] as unknown as TTools,
         output,
-        checkpointer,
+        checkpointer = new MemorySaver(),
         agentsMd,
         subagents,
         backend,
@@ -175,7 +209,7 @@ export class DeepAgent<
             systemPrompt,
             tools: this.tools as any,
             ...(this.output ? { responseFormat: this.output as any } : {}),
-            ...(this.checkpointer !== undefined ? { checkpointer: this.checkpointer } : {}),
+            checkpointer: this.checkpointer,
             ...(this.agentsMd ? { memory: this.agentsMd } : {}),
             ...(this.subagents ? { subagents: this.subagents } : {}),
             ...(this.backend ? { backend: this.backend as any } : {}),
