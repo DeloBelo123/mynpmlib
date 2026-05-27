@@ -3,6 +3,21 @@ import type { CreateDeepAgentParams, DynamicStructuredTool } from "../../imports
 import type { LocalShellBackend } from "deepagents"
 import type { DenoSandbox } from "@langchain/deno"
 import type { DaytonaSandbox } from "@langchain/daytona"
+import type {
+    DeepAgentAllowedDecision,
+    DeepAgentInterrupt,
+    DeepAgentUserDecision,
+} from "./interruptTypes"
+
+export type {
+    DeepAgentAllowedDecision,
+    DeepAgentInterrupt,
+    DeepAgentInterruptSingle,
+    DeepAgentInterruptBatch,
+    DeepAgentStreamChunk,
+    DeepAgentUserDecision,
+    DeepAgentResumeInput,
+} from "./interruptTypes"
 
 /** Immer verfügbare Filesystem-Tools von DeepAgents (Middleware). */
 export const DEEP_AGENT_FILESYSTEM_TOOLS = [
@@ -320,4 +335,118 @@ export function createResumeCommand(
         ? { decisions }
         : decisions
     return new Command({ resume })
+}
+
+/**
+ * Mappt LangGraph `HITLRequest` auf unser flaches `DeepAgentInterrupt`-Objekt.
+ */
+export function mapHitlToInterrupt(hitl: HITLRequest): DeepAgentInterrupt {
+    const requests = hitl.actionRequests ?? []
+    const reviews = hitl.reviewConfigs ?? []
+
+    if (requests.length <= 1) {
+        const action = requests[0]
+        const review = reviews[0]
+        return {
+            kind: "interrupt",
+            question: action?.description ?? `Tool: ${action?.name ?? "unknown"}`,
+            decisions: (review?.allowedDecisions ?? ["approve", "reject"]) as DeepAgentAllowedDecision[],
+            ...(action?.name ? { toolName: action.name } : {}),
+            ...(action?.args ? { args: action.args as Record<string, unknown> } : {}),
+        }
+    }
+
+    return {
+        kind: "interrupt",
+        items: requests.map((action, i) => ({
+            question: action.description ?? `Tool: ${action.name}`,
+            decisions: (reviews[i]?.allowedDecisions ?? ["approve", "reject"]) as DeepAgentAllowedDecision[],
+            toolName: action.name,
+            args: (action.args ?? {}) as Record<string, unknown>,
+        })),
+    }
+}
+
+export function mapResultToInterrupt(result: unknown): DeepAgentInterrupt | undefined {
+    if (!isInterruptResult(result)) return undefined
+    const hitl = getHitlRequest(result)
+    if (!hitl) return undefined
+    return mapHitlToInterrupt(hitl)
+}
+
+export function userDecisionToHitl(
+    decision: DeepAgentUserDecision,
+    toolName?: string,
+): HitlUserDecision {
+    if (decision === "approve") return approveDecision()
+    if (decision === "reject") return rejectDecision()
+    if (decision.type === "reject") return rejectDecision(decision.message)
+    if (!toolName) {
+        throw new Error("toolName is required for edit decisions")
+    }
+    return editDecision(toolName, decision.args)
+}
+
+export function expandResumeDecisions(
+    decision: DeepAgentUserDecision | undefined,
+    decisions: DeepAgentUserDecision[] | undefined,
+    pendingCount: number,
+    defaultToolName?: string,
+): HitlUserDecision[] {
+    if (decisions) {
+        if (decisions.length !== pendingCount) {
+            throw new Error(`Expected ${pendingCount} decisions, got ${decisions.length}`)
+        }
+        return decisions.map((d) => userDecisionToHitl(d, defaultToolName))
+    }
+
+    const single = decision ?? "approve"
+    return Array.from({ length: pendingCount }, () => userDecisionToHitl(single, defaultToolName))
+}
+
+export async function getPendingInterruptCount(agent: any, config: Record<string, unknown> | undefined): Promise<number> {
+    if (!agent?.getState || !config) return 1
+
+    try {
+        const state = await agent.getState(config)
+        const tasks = state?.tasks ?? []
+        for (const task of tasks) {
+            const interrupts = task?.interrupts ?? []
+            if (interrupts.length > 0) {
+                const value = interrupts[0]?.value ?? interrupts[0]
+                if (value?.actionRequests?.length) return value.actionRequests.length
+            }
+        }
+
+        const values = state?.values
+        if (values?.__interrupt__?.length) {
+            const hitl = values.__interrupt__[0]?.value
+            if (hitl?.actionRequests?.length) return hitl.actionRequests.length
+        }
+    } catch {
+        return 1
+    }
+
+    return 1
+}
+
+export function extractInterruptFromStreamUpdate(data: unknown): DeepAgentInterrupt | undefined {
+    if (!data || typeof data !== "object") return undefined
+
+    const record = data as Record<string, unknown>
+    if ("__interrupt__" in record && Array.isArray(record.__interrupt__)) {
+        const hitl = (record.__interrupt__ as Array<{ value?: HITLRequest }>)[0]?.value
+        if (hitl) return mapHitlToInterrupt(hitl)
+    }
+
+    for (const value of Object.values(record)) {
+        if (!value || typeof value !== "object") continue
+        const nested = value as Record<string, unknown>
+        if ("__interrupt__" in nested && Array.isArray(nested.__interrupt__)) {
+            const hitl = (nested.__interrupt__ as Array<{ value?: HITLRequest }>)[0]?.value
+            if (hitl) return mapHitlToInterrupt(hitl)
+        }
+    }
+
+    return undefined
 }

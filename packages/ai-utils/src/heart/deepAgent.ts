@@ -15,15 +15,22 @@ import {
 } from "../imports"
 import { getLLM } from "../helpers/llms"
 import { structure } from "../magic-funcs/parsers/structure"
-import type {
-    DeepAgentInterruptableToolName,
-    InterruptOnFor,
+import type { DeepAgentInterrupt, DeepAgentResumeInput } from "../helpers/deepagent/interruptTypes"
+import {
+    createResumeCommand,
+    expandResumeDecisions,
+    extractInterruptFromStreamUpdate,
+    getPendingInterruptCount,
+    mapResultToInterrupt,
+    type DeepAgentInterruptableToolName,
+    type InterruptOnFor,
 } from "../helpers/deepagent/interruptOn"
 
 interface DeepAgentProps<
     T extends OutputSchema | undefined = undefined,
     TTools extends readonly DynamicStructuredTool[] = readonly [],
     TBackend = undefined,
+    TInterruptOn extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>> | undefined = undefined,
 > {
     tools?: TTools
     prompt?: string | Array<string>
@@ -36,7 +43,7 @@ interface DeepAgentProps<
     permissions?: FilesystemPermission[]
     skills?: string[]
     middleware?: AgentMiddleware[]
-    interruptOn?: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>
+    interruptOn?: TInterruptOn
     store?: BaseStore
     name?: string
     contextSchema?: CreateDeepAgentParams["contextSchema"]
@@ -65,6 +72,29 @@ function blocksToSystemPrompt(blocks: Array<["system", string]>): string {
     return blocks.map(([, text]) => text).join("\n\n")
 }
 
+function extractTextFromMessageChunk(chunk: unknown): string | undefined {
+    const messageChunk = Array.isArray(chunk) ? chunk[0] : chunk
+    const metadata = Array.isArray(chunk) ? chunk[1] : undefined
+    const node = metadata?.langgraph_node
+    const messageType = typeof messageChunk?._getType === "function"
+        ? messageChunk._getType()
+        : messageChunk?._getType
+
+    if (node === "tools" || messageType === "tool") {
+        return undefined
+    }
+
+    const raw = messageChunk?.content
+    if (typeof raw === "string") {
+        return raw.length > 0 ? raw : undefined
+    }
+    if (Array.isArray(raw)) {
+        const text = raw.map((part: any) => part?.text ?? "").join("")
+        return text.length > 0 ? text : undefined
+    }
+    return undefined
+}
+
 /**
  * DeepAgent mit typisiertem `interruptOn` — Keys = Filesystem-Tools + `tools[]` + optional `execute`.
  * Für Literal-Autocomplete bei Custom-Tools: `tools: [myTool] as const`.
@@ -73,12 +103,14 @@ export class DeepAgent<
     T extends OutputSchema | undefined = undefined,
     const TTools extends readonly DynamicStructuredTool[] = readonly [],
     TBackend = undefined,
+    TInterruptOn extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>> | undefined = undefined,
 > {
     private prompt: Array<["system", string]>
     private tools: TTools
     private llm: BaseChatModel
     private output: T | undefined
     private agent: any
+    private agentCacheDirty = true
     private checkpointer: BaseCheckpointSaver | boolean | undefined
     private agentsMd: string[] | undefined
     private subagents: SubAgent[] | undefined
@@ -86,11 +118,12 @@ export class DeepAgent<
     private permissions: FilesystemPermission[] | undefined
     private skills: string[] | undefined
     private middleware: AgentMiddleware[] | undefined
-    private interruptOn: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>> | undefined
+    private interruptOn: TInterruptOn
     private store: BaseStore | undefined
     private name: string | undefined
     private contextSchema: CreateDeepAgentParams["contextSchema"]
     private should_use_output: boolean = true
+    private lastRunMode = new Map<string, "invoke" | "stream">()
 
     constructor({
         prompt = `Du bist ein hilfreicher Deep Agent.`,
@@ -108,7 +141,7 @@ export class DeepAgent<
         store,
         name,
         contextSchema,
-    }: DeepAgentProps<T, TTools, TBackend> = {} as DeepAgentProps<T, TTools, TBackend>) {
+    }: DeepAgentProps<T, TTools, TBackend, TInterruptOn> = {} as DeepAgentProps<T, TTools, TBackend, TInterruptOn>) {
         this.prompt = typeof prompt === "string"
             ? [["system", prompt]]
             : prompt.map((p: string) => ["system", p] as ["system", string])
@@ -122,30 +155,20 @@ export class DeepAgent<
         this.permissions = permissions
         this.skills = skills
         this.middleware = middleware
-        this.interruptOn = interruptOn
+        this.interruptOn = interruptOn as TInterruptOn
         this.store = store
         this.name = name
         this.contextSchema = contextSchema
     }
 
-    public async invoke(this: DeepAgent<undefined, TTools, TBackend>, invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> }): Promise<string>
-    public async invoke<U extends OutputSchema>(this: DeepAgent<U, TTools, TBackend>, invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> }): Promise<z.infer<U>>
-    public async invoke(invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> }): Promise<string | z.infer<OutputSchema>> {
-        const { thread_id, debug, promptVars, context, ...variables } = invokeInput
+    private markAgentDirty() {
+        this.agentCacheDirty = true
+    }
 
-        if (this.checkpointer && !thread_id) {
-            throw new Error("thread_id is required when using checkpointer, else no state is stored")
+    private async ensureAgent(systemPrompt: string) {
+        if (!this.agentCacheDirty && this.agent) {
+            return this.agent
         }
-        if (!this.checkpointer && thread_id) {
-            console.warn("WARN: thread_id is provided but no checkpointer is set, so no state is stored")
-        }
-
-        const humanMessages: HumanMessage[] = Object.entries(variables).map(
-            ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
-        )
-
-        const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
-        const systemPrompt = blocksToSystemPrompt(resolvedPrompt)
 
         this.agent = createDeepAgent({
             model: this.llm as any,
@@ -164,15 +187,30 @@ export class DeepAgent<
             ...(this.name ? { name: this.name } : {}),
             ...(this.contextSchema ? { contextSchema: this.contextSchema as any } : {}),
         })
+        this.agentCacheDirty = false
+        return this.agent
+    }
 
-        const config = thread_id && this.checkpointer
+    private buildConfig(thread_id?: string, context?: Record<string, any>) {
+        return thread_id && this.checkpointer
             ? { configurable: { thread_id }, ...(context ? { context } : {}) }
             : context
                 ? { context }
                 : undefined
+    }
 
-        const result = await this.agent.invoke({ messages: humanMessages } as any, config)
-        if (debug) return result
+    private validateThreadConfig(thread_id?: string) {
+        if (this.checkpointer && !thread_id) {
+            throw new Error("thread_id is required when using checkpointer, else no state is stored")
+        }
+        if (!this.checkpointer && thread_id) {
+            console.warn("WARN: thread_id is provided but no checkpointer is set, so no state is stored")
+        }
+    }
+
+    private async mapInvokeResult(result: any): Promise<string | z.infer<OutputSchema> | DeepAgentInterrupt> {
+        const interrupt = mapResultToInterrupt(result)
+        if (interrupt) return interrupt
 
         if (this.output && this.should_use_output && result?.structuredResponse !== undefined) {
             return result.structuredResponse as z.infer<OutputSchema>
@@ -191,17 +229,62 @@ export class DeepAgent<
         return content
     }
 
-    public async *stream(invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> }): AsyncGenerator<string, void, unknown> {
+    public async invoke(
+        this: DeepAgent<undefined, TTools, TBackend, undefined>,
+        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
+    ): Promise<string>
+    public async invoke<U extends OutputSchema>(
+        this: DeepAgent<U, TTools, TBackend, undefined>,
+        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
+    ): Promise<z.infer<U>>
+    public async invoke<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
+        this: DeepAgent<undefined, TTools, TBackend, I>,
+        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
+    ): Promise<string | DeepAgentInterrupt>
+    public async invoke<U extends OutputSchema, I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
+        this: DeepAgent<U, TTools, TBackend, I>,
+        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
+    ): Promise<z.infer<U> | DeepAgentInterrupt>
+    public async invoke(
+        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
+    ): Promise<string | z.infer<OutputSchema> | DeepAgentInterrupt> {
+        const { thread_id, debug, promptVars, context, ...variables } = invokeInput
+
+        this.validateThreadConfig(thread_id)
+        if (thread_id) this.lastRunMode.set(thread_id, "invoke")
+
+        const humanMessages: HumanMessage[] = Object.entries(variables).map(
+            ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
+        )
+
+        const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
+        const systemPrompt = blocksToSystemPrompt(resolvedPrompt)
+        const agent = await this.ensureAgent(systemPrompt)
+        const config = this.buildConfig(thread_id, context)
+
+        const result = await agent.invoke({ messages: humanMessages } as any, config)
+        if (debug) return result
+
+        return this.mapInvokeResult(result)
+    }
+
+    public stream(
+        this: DeepAgent<T, TTools, TBackend, undefined>,
+        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
+    ): AsyncGenerator<string, void, unknown>
+    public stream<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
+        this: DeepAgent<T, TTools, TBackend, I>,
+        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
+    ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown>
+    public async *stream(
+        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
+    ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown> {
         this.should_use_output = false
         try {
             const { thread_id, promptVars, context, ...variables } = invokeInput
 
-            if (this.checkpointer && !thread_id) {
-                throw new Error("thread_id is required when using checkpointer, else no state is stored")
-            }
-            if (!this.checkpointer && thread_id) {
-                console.warn("WARN: thread_id is provided but no checkpointer is set, so no state is stored")
-            }
+            this.validateThreadConfig(thread_id)
+            if (thread_id) this.lastRunMode.set(thread_id, "stream")
 
             const humanMessages: HumanMessage[] = Object.entries(variables).map(
                 ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
@@ -209,54 +292,113 @@ export class DeepAgent<
 
             const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
             const systemPrompt = blocksToSystemPrompt(resolvedPrompt)
+            const agent = await this.ensureAgent(systemPrompt)
+            const config = this.buildConfig(thread_id, context)
 
-            this.agent = createDeepAgent({
-                model: this.llm as any,
-                systemPrompt,
-                tools: this.tools as any,
-                ...(this.checkpointer !== undefined ? { checkpointer: this.checkpointer } : {}),
-                ...(this.agentsMd ? { memory: this.agentsMd } : {}),
-                ...(this.subagents ? { subagents: this.subagents } : {}),
-                ...(this.backend ? { backend: this.backend as any } : {}),
-                ...(this.permissions ? { permissions: this.permissions } : {}),
-                ...(this.skills ? { skills: this.skills } : {}),
-                ...(this.middleware ? { middleware: this.middleware as any } : {}),
-                ...(this.interruptOn ? { interruptOn: this.interruptOn as any } : {}),
-                ...(this.store ? { store: this.store } : {}),
-                ...(this.name ? { name: this.name } : {}),
-                ...(this.contextSchema ? { contextSchema: this.contextSchema as any } : {}),
-            })
-
-            const config = thread_id && this.checkpointer
-                ? { configurable: { thread_id }, ...(context ? { context } : {}) }
-                : context
-                    ? { context }
-                    : undefined
-
-            const nativeStream = await this.agent.stream(
+            const streamMode = this.interruptOn ? (["messages", "updates"] as const) : "messages"
+            const nativeStream = await agent.stream(
                 { messages: humanMessages } as any,
-                { ...(config ?? {}), streamMode: "messages" } as any
+                { ...(config ?? {}), streamMode } as any,
             )
 
             for await (const chunk of nativeStream) {
-                const messageChunk = Array.isArray(chunk) ? chunk[0] : chunk
-                const metadata = Array.isArray(chunk) ? chunk[1] : undefined
-                const node = metadata?.langgraph_node
-                const messageType = typeof messageChunk?._getType === "function" ? messageChunk._getType() : messageChunk?._getType
-
-                if (node === "tools" || messageType === "tool") {
-                    continue
+                if (this.interruptOn && Array.isArray(chunk) && chunk.length === 2) {
+                    const [mode, data] = chunk
+                    if (mode === "updates") {
+                        const interrupt = extractInterruptFromStreamUpdate(data)
+                        if (interrupt) {
+                            yield interrupt
+                            return
+                        }
+                        continue
+                    }
+                    if (mode === "messages") {
+                        const text = extractTextFromMessageChunk(data)
+                        if (text) yield text
+                        continue
+                    }
                 }
 
-                const raw = messageChunk?.content
-                if (typeof raw === "string") {
-                    if (raw.length > 0) yield raw
-                    continue
+                const text = extractTextFromMessageChunk(chunk)
+                if (text) yield text
+            }
+        } finally {
+            this.should_use_output = true
+        }
+    }
+
+    public resume(
+        input: DeepAgentResumeInput,
+    ): Promise<string | z.infer<T> | DeepAgentInterrupt> | AsyncGenerator<string | DeepAgentInterrupt, void, unknown> {
+        if (!this.interruptOn) {
+            throw new Error("resume() requires interruptOn to be configured on DeepAgent")
+        }
+        if (!this.checkpointer) {
+            throw new Error("resume() requires a checkpointer")
+        }
+
+        const mode = this.lastRunMode.get(input.thread_id) ?? "invoke"
+        if (mode === "stream") {
+            return this.resumeStream(input)
+        }
+        return this.resumeInvoke(input)
+    }
+
+    private async resumeInvoke(input: DeepAgentResumeInput): Promise<string | z.infer<T> | DeepAgentInterrupt> {
+        const { thread_id, context, decision, decisions } = input
+        this.lastRunMode.set(thread_id, "invoke")
+
+        const systemPrompt = blocksToSystemPrompt(this.prompt)
+        const agent = await this.ensureAgent(systemPrompt)
+        const config = this.buildConfig(thread_id, context)
+
+        const pendingCount = await getPendingInterruptCount(agent, config as Record<string, unknown> | undefined)
+        const hitlDecisions = expandResumeDecisions(decision, decisions, pendingCount)
+        const command = createResumeCommand(hitlDecisions)
+
+        const result = await agent.invoke(command as any, config)
+        return this.mapInvokeResult(result) as Promise<string | z.infer<T> | DeepAgentInterrupt>
+    }
+
+    private async *resumeStream(input: DeepAgentResumeInput): AsyncGenerator<string | DeepAgentInterrupt, void, unknown> {
+        const { thread_id, context, decision, decisions } = input
+        this.lastRunMode.set(thread_id, "stream")
+        this.should_use_output = false
+
+        try {
+            const systemPrompt = blocksToSystemPrompt(this.prompt)
+            const agent = await this.ensureAgent(systemPrompt)
+            const config = this.buildConfig(thread_id, context)
+
+            const pendingCount = await getPendingInterruptCount(agent, config as Record<string, unknown> | undefined)
+            const hitlDecisions = expandResumeDecisions(decision, decisions, pendingCount)
+            const command = createResumeCommand(hitlDecisions)
+
+            const nativeStream = await agent.stream(
+                command as any,
+                { ...(config ?? {}), streamMode: ["messages", "updates"] } as any,
+            )
+
+            for await (const chunk of nativeStream) {
+                if (Array.isArray(chunk) && chunk.length === 2) {
+                    const [mode, data] = chunk
+                    if (mode === "updates") {
+                        const interrupt = extractInterruptFromStreamUpdate(data)
+                        if (interrupt) {
+                            yield interrupt
+                            return
+                        }
+                        continue
+                    }
+                    if (mode === "messages") {
+                        const text = extractTextFromMessageChunk(data)
+                        if (text) yield text
+                        continue
+                    }
                 }
-                if (Array.isArray(raw)) {
-                    const text = raw.map((part: any) => part?.text ?? "").join("")
-                    if (text.length > 0) yield text
-                }
+
+                const text = extractTextFromMessageChunk(chunk)
+                if (text) yield text
             }
         } finally {
             this.should_use_output = true
@@ -265,9 +407,12 @@ export class DeepAgent<
 
     public addTool(tool: DynamicStructuredTool) {
         ;(this.tools as unknown as DynamicStructuredTool[]).push(tool)
+        this.markAgentDirty()
     }
 
     public get currentTools(): string[] {
         return (this.tools as unknown as DynamicStructuredTool[]).map(tool => tool.name)
     }
 }
+
+export type { DeepAgentResumeInput } from "../helpers/deepagent/interruptTypes"

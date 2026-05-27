@@ -321,6 +321,44 @@ const deepAgent = new DeepAgent({
 // sandbox.close() wenn fertig
 ```
 
+### Human-in-the-Loop (`interruptOn`)
+
+Pausiert den Agent **vor** Tool-Ausführung. Braucht `checkpointer` + `thread_id`.
+
+```ts
+import {
+    DeepAgent,
+    MemorySaver,
+    requireApproval,
+    StreamResponse,
+} from "@delofarag/ai-utils"
+import { isInterrupt } from "@delofarag/ai-utils/client"
+
+const hrAgent = new DeepAgent({
+    checkpointer: new MemorySaver(),
+    interruptOn: requireApproval("write_file"),
+})
+
+// invoke
+let res = await hrAgent.invoke({ input: "Lösch alte Logs", thread_id: "u1" })
+if (isInterrupt(res)) {
+    res = await hrAgent.resume({ thread_id: "u1", decision: "approve" })
+}
+
+// stream (NDJSON via StreamResponse)
+for await (const chunk of hrAgent.stream({ input: "Analysiere...", thread_id: "u1" })) {
+    if (isInterrupt(chunk)) break
+    process.stdout.write(chunk)
+}
+
+// API route
+return StreamResponse(hrAgent.resume({ thread_id: "u1", decision: "approve" }))
+```
+
+Frontend: `import { isInterrupt } from "@delofarag/ai-utils/client"` — kein LangChain im Bundle.
+
+Ohne `interruptOn`: invoke/stream liefern plain `string` wie bisher.
+
 ### Backend-Helper
 
 - `createStateBackend()`

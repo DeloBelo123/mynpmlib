@@ -1,7 +1,21 @@
 import { BaseChatModel, BaseOutputParser, ChatPromptTemplate, StructuredOutputParser } from "../imports";
 import { z } from "zod/v4";
+import type { DeepAgentStreamChunk } from "./deepagent/interruptTypes";
+import { isInterrupt } from "../client/index";
 
-export function logChunk(chunk: string) {
+export function logChunk(chunk: DeepAgentStreamChunk) {
+  if (isInterrupt(chunk)) {
+    if ("items" in chunk) {
+      console.log("\n[interrupt] Multiple tools require approval:")
+      for (const item of chunk.items) {
+        console.log(`  - ${item.toolName}: ${item.question}`)
+      }
+    } else {
+      console.log(`\n[interrupt] ${chunk.question}`)
+    }
+    return
+  }
+
   const flushed = process.stdout.write(chunk)
   if (!flushed) {
     process.stdout.once('drain', () => {})

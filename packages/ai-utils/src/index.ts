@@ -11,6 +11,15 @@ export * from "./helpers/deepagent/sandbox"
 export * from "./helpers/deepagent/subagent"
 export * from "./helpers/deepagent/permissions"
 export * from "./helpers/deepagent/interruptOn"
+export type {
+    DeepAgentAllowedDecision,
+    DeepAgentInterrupt,
+    DeepAgentInterruptSingle,
+    DeepAgentInterruptBatch,
+    DeepAgentStreamChunk,
+    DeepAgentUserDecision,
+    DeepAgentResumeInput,
+} from "./helpers/deepagent/interruptTypes"
 export * from "./heart/tools/ToolRegistry"
 export { tavilySearchTool, TavilySearch } from "./heart/tools/Tavily"
 export * from "./heart/tools/RAGTool"

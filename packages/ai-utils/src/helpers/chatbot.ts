@@ -1,8 +1,10 @@
 import { input } from "@delofarag/base-utils/server"
 import { logChunk } from "./helpers"
-import type { Agent } from "../heart/agent"
+import type { DeepAgentStreamChunk } from "./deepagent/interruptTypes"
 
-type SessionStreamable = Agent<any>
+type SessionStreamable = {
+    stream(input: { input: string; thread_id: string }): AsyncIterable<DeepAgentStreamChunk>
+}
 
 type SessionProps = {
     streamable: SessionStreamable
