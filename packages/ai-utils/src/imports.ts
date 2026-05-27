@@ -48,6 +48,9 @@ import {
     CompositeBackend,
     type CreateDeepAgentParams,
     type DeepAgent as DeepAgentInterface,
+    type SubAgent,
+    type FilesystemPermission,
+    type LocalShellBackendOptions,
   } from "deepagents";
 
 import { InMemoryStore } from "@langchain/langgraph";
@@ -147,6 +150,9 @@ export {
     FilesystemBackend,
     LocalShellBackend,
     CompositeBackend,
+    type SubAgent,
+    type FilesystemPermission,
+    type LocalShellBackendOptions,
 }
 
 // DeepAgents package, Utils

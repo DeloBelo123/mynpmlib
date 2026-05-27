@@ -2,7 +2,7 @@
 
 Ein praktisches Utility-Package für LLM-Apps mit LangChain:
 
-- `Chain`, `Agent`
+- `Chain`, `Agent`, `DeepAgent`
 - Memory via Checkpoint-Saver (`MemorySaver`, `SmartCheckpointSaver`, `SupabaseCheckpointSaver`)
 - RAG-Helper (FAISS, Supabase, In-Memory)
 - Tooling (`ToolRegistry`, `CombinedToolRegistry`, `ZodiosToolRegistry`, `createRAGTool`, `tavilySearchTool`)
@@ -155,7 +155,7 @@ for await (const chunk of chain.stream({ question: "Erkläre das kurz." })) {
 
 ## 2) `Agent`
 
-Tool-using Agent auf Basis von `createReactAgent`. Unterstützt optional Memory und strukturierten Output.
+Tool-using Agent auf Basis von `createReactAgent`. Unterstützt optional Checkpointer (Thread-State) und strukturierten Output.
 
 ### Basis
 
@@ -181,14 +181,14 @@ const agent = new Agent({
 const result = await agent.invoke({ input: "Was ist 8 + 13?" })
 ```
 
-### Memory mit `Agent`
+### Checkpointer mit `Agent`
 
-Conversation Memory läuft über Checkpoint-Saver + `thread_id`:
+Conversation State läuft über Checkpoint-Saver + `thread_id`:
 
 ```ts
 import { Agent, MemorySaver, SmartCheckpointSaver, getLLM } from "@delofarag/ai-utils"
 
-const memory = new SmartCheckpointSaver(new MemorySaver(), {
+const checkpointer = new SmartCheckpointSaver(new MemorySaver(), {
     llm: getLLM({ provider: "openrouter" }),
     messagesBeforeSummary: 12,
     maxSummaries: 7
@@ -197,7 +197,7 @@ const memory = new SmartCheckpointSaver(new MemorySaver(), {
 const agent = new Agent({
     tools: [...],
     prompt: "Du bist ein hilfreicher Assistent.",
-    memory
+    checkpointer
 })
 
 await agent.invoke({ thread_id: "u1", input: "Ich heisse Max." })
@@ -244,6 +244,90 @@ for await (const chunk of agent.stream({ input: "Erkläre mir das.", thread_id: 
     process.stdout.write(chunk)
 }
 ```
+
+---
+
+## 3) `DeepAgent`
+
+LangChain Deep Agent auf Basis von `createDeepAgent()`. Bringt Filesystem, Planning, Subagents und optional Sandboxes mit.
+
+### Basis
+
+```ts
+import {
+    DeepAgent,
+    createWorkspaceBackend,
+    workspacePermissions,
+    MemorySaver,
+    getLLM,
+} from "@delofarag/ai-utils"
+
+const deepAgent = new DeepAgent({
+    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
+    prompt: "Du bist ein Coding Agent.",
+    tools: [...],
+    backend: createWorkspaceBackend({ rootDir: process.cwd() }),
+    permissions: workspacePermissions(),
+    checkpointer: new MemorySaver(),
+})
+
+const answer = await deepAgent.invoke({
+    input: "Analysiere src/heart/agent.ts",
+    thread_id: "u1",
+})
+```
+
+### `agentsMd` vs `checkpointer`
+
+| Prop | LangChain-Parameter | Bedeutung |
+|---|---|---|
+| `checkpointer` | `checkpointer` | Thread-State über `thread_id` |
+| `agentsMd` | `memory` | AGENTS.md-Pfade als Startup-Kontext |
+
+```ts
+const deepAgent = new DeepAgent({
+    agentsMd: ["./AGENTS.md", "./.deepagents/AGENTS.md"],
+    checkpointer: new MemorySaver(),
+})
+```
+
+### Subagents
+
+```ts
+import { DeepAgent, createSubAgent } from "@delofarag/ai-utils"
+
+const deepAgent = new DeepAgent({
+    subagents: [
+        createSubAgent({
+            name: "researcher",
+            description: "Recherchiert komplexe Themen",
+            prompt: "Du bist ein Research-Spezialist.",
+            tools: [...],
+        }),
+    ],
+})
+```
+
+### Sandbox
+
+```ts
+import { DeepAgent, createDenoSandbox } from "@delofarag/ai-utils"
+
+const sandbox = await createDenoSandbox()
+const deepAgent = new DeepAgent({
+    backend: sandbox,
+})
+
+// sandbox.close() wenn fertig
+```
+
+### Backend-Helper
+
+- `createStateBackend()`
+- `createFilesystemBackend({ rootDir, virtualMode })`
+- `createWorkspaceBackend({ rootDir, route })`
+- `createLocalShellBackend()` (async, Host-Shell — nur Dev)
+- `createDenoSandbox()` / `createDaytonaSandbox()` (async)
 
 ---
 
@@ -318,16 +402,16 @@ const response = await tavily.invoke({ query: "latest AI regulation EU" })
 
 ---
 
-## Memory
+## Memory (Checkpoint-Saver)
 
-Memory wird über LangGraph Checkpoint-Saver an den `Agent` gehängt — nicht über eine eigene Chain-Klasse.
+Thread-State wird über LangGraph Checkpoint-Saver an `Agent` / `DeepAgent` gehängt — nicht über eine eigene Chain-Klasse.
 
 ### `MemorySaver` (in-memory, schnell für local/dev)
 
 ```ts
 import { MemorySaver, SmartCheckpointSaver, getLLM } from "@delofarag/ai-utils"
 
-const memory = new SmartCheckpointSaver(new MemorySaver(), {
+const checkpointer = new SmartCheckpointSaver(new MemorySaver(), {
     llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
     messagesBeforeSummary: 12,
     maxSummaries: 7
@@ -363,7 +447,7 @@ const saver = new SupabaseCheckpointSaver(checkpointsTable)
 
 const agent = new Agent({
     tools: [...],
-    memory: saver
+    checkpointer: saver
 })
 ```
 

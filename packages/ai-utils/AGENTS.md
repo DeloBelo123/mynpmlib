@@ -7,25 +7,26 @@ Kurzreferenz für Entwicklung und AI-Assistenten in `@delofarag/ai-utils`.
 | Modul | Pfad | Zweck |
 |---|---|---|
 | `Chain` | `src/heart/chain.ts` | Stateless LLM-Calls mit Zod-Output, optional RAG |
-| `Agent` | `src/heart/agent.ts` | Tool-using ReAct-Agent, optional Memory + strukturierter Output |
-| Memory | `src/helpers/memory.ts` | Checkpoint-Saver (Supabase, Smart-Summary) |
+| `Agent` | `src/heart/agent.ts` | Tool-using ReAct-Agent, optional Checkpointer + strukturierter Output |
+| `DeepAgent` | `src/heart/deepAgent.ts` | LangChain Deep Agent (Filesystem, Subagents, Sandboxes) |
+| Checkpointer | `src/helpers/memory.ts` | Checkpoint-Saver (Supabase, Smart-Summary) |
 | RAG | `src/helpers/rag.ts` | Vector Stores, `createRAGChain`, `createRAGTool` |
+| DeepAgent-Helper | `src/helpers/deepagent/` | Backend, Sandbox, Subagent, Permissions |
 | Tools | `src/heart/tools/` | `ToolRegistry`, `CombinedToolRegistry`, `ZodiosToolRegistry`, Tavily |
 | Magic-Funcs | `src/magic-funcs/` | Einzeiler-LLM-Helper (ask, extract, classify, …) |
 | Modalities | `src/modalities/` | STT, TTS, Vision, Image-Gen über OpenRouter |
 
 ## Entfernt / nicht mehr exportiert
 
-- **`MemoryChain`** — existiert nicht mehr. Conversation Memory läuft über **`Agent` + `memory` + `thread_id`**.
-- **`deepAgent.ts`** — aktuell leer, nicht in `index.ts` exportiert.
-- **`helpers/deepagent/sandbox.ts`** — Stub, noch nicht fertig.
+- **`MemoryChain`** — existiert nicht mehr. Thread-State läuft über **`Agent` / `DeepAgent` + `checkpointer` + `thread_id`**.
+- **`Agent.memory`** — umbenannt zu **`checkpointer`** (Breaking Change).
 
-## Memory-Pattern (aktuell)
+## Checkpointer-Pattern
 
 ```ts
 import { Agent, MemorySaver, SmartCheckpointSaver, getLLM } from "@delofarag/ai-utils"
 
-const memory = new SmartCheckpointSaver(new MemorySaver(), {
+const checkpointer = new SmartCheckpointSaver(new MemorySaver(), {
     messagesBeforeSummary: 12,
     maxSummaries: 7,
     llm: getLLM({ provider: "openrouter" }),
@@ -33,26 +34,48 @@ const memory = new SmartCheckpointSaver(new MemorySaver(), {
 
 const agent = new Agent({
     tools: [...],
-    memory,
+    checkpointer,
 })
 
 await agent.invoke({ input: "Ich heisse Max.", thread_id: "u1" })
 await agent.invoke({ input: "Wie heisse ich?", thread_id: "u1" })
 ```
 
-- `thread_id` ist **Pflicht**, wenn `memory` gesetzt ist.
+- `thread_id` ist **Pflicht**, wenn `checkpointer` gesetzt ist.
 - `Chain` ignoriert `thread_id` (loggt nur einen Error).
 - Produktion: `SupabaseCheckpointSaver` statt `MemorySaver`.
 
-## Agent vs Chain
+## DeepAgent-Pattern
 
-| | `Chain` | `Agent` |
-|---|---|---|
-| Tools | nein | ja |
-| Memory | nein | optional via `memory` |
-| Output | Zod-Schema (default `{ output: string }`) | optional Zod via `output` |
-| Stream | ja (Text) | ja (Text, ohne Tool-Nodes) |
-| RAG | eingebaut via `vectorStore` | via `createRAGTool` als Tool |
+```ts
+import { DeepAgent, createWorkspaceBackend, MemorySaver, getLLM } from "@delofarag/ai-utils"
+
+const deepAgent = new DeepAgent({
+    llm: getLLM({ provider: "openrouter" }),
+    tools: [...],
+    agentsMd: ["./AGENTS.md"],
+    backend: createWorkspaceBackend({ rootDir: process.cwd() }),
+    checkpointer: new MemorySaver(),
+})
+
+await deepAgent.invoke({ input: "Analysiere das Projekt.", thread_id: "u1" })
+```
+
+- `agentsMd` → `createDeepAgent({ memory })` (AGENTS.md Startup-Kontext, kein Chat-Verlauf)
+- `checkpointer` → LangGraph Thread-Persistenz (wie bei `Agent`)
+
+## Chain vs Agent vs DeepAgent
+
+| | `Chain` | `Agent` | `DeepAgent` |
+|---|---|---|---|
+| Runtime | prompt pipe / RAG | `createReactAgent` | `createDeepAgent` |
+| Tools | nein | ja | ja + built-in fs/planning/subagents |
+| Thread-State | nein | optional via `checkpointer` | optional via `checkpointer` |
+| AGENTS.md-Kontext | nein | nein | optional via `agentsMd` |
+| Output | Zod (default schema) | optional Zod via `output` | optional Zod via `output` |
+| Stream | ja (Text) | ja (Text) | ja (Text) |
+| RAG | `vectorStore` | `createRAGTool` | `createRAGTool` |
+| Filesystem / Sandbox | nein | nein | ja via `backend` |
 
 ## Tool-Registries
 
