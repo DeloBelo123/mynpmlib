@@ -16,7 +16,8 @@ export type {
     DeepAgentInterruptBatch,
     DeepAgentStreamChunk,
     DeepAgentUserDecision,
-    DeepAgentResumeInput,
+    DeepAgentRunInputBase,
+    DeepAgentHitlFields,
 } from "./interruptTypes"
 
 /** Immer verfügbare Filesystem-Tools von DeepAgents (Middleware). */

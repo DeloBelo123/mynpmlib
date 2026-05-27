@@ -342,7 +342,7 @@ const hrAgent = new DeepAgent({
 // invoke
 let res = await hrAgent.invoke({ input: "Lösch alte Logs", thread_id: "u1" })
 if (isInterrupt(res)) {
-    res = await hrAgent.resume({ thread_id: "u1", decision: "approve" })
+    res = await hrAgent.invoke({ thread_id: "u1", decision: "approve" })
 }
 
 // stream (NDJSON via StreamResponse)
@@ -351,8 +351,13 @@ for await (const chunk of hrAgent.stream({ input: "Analysiere...", thread_id: "u
     process.stdout.write(chunk)
 }
 
-// API route
-return StreamResponse(hrAgent.resume({ thread_id: "u1", decision: "approve" }))
+// API route — gleiche Methode für Message und Resume
+return StreamResponse(
+    hrAgent.stream({
+        thread_id: "u1",
+        ...(decision ? { decision } : { input: message }),
+    })
+)
 ```
 
 Frontend: `import { isInterrupt } from "@delofarag/ai-utils/client"` — kein LangChain im Bundle.

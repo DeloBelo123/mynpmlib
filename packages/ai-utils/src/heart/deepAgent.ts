@@ -1,6 +1,6 @@
 import { z } from "zod/v4"
 import { PromptTemplate } from "@langchain/core/prompts"
-import type { InvokeInputBase, OutputSchema } from "./chain"
+import type { OutputSchema } from "./chain"
 import {
     DynamicStructuredTool,
     BaseChatModel,
@@ -16,7 +16,12 @@ import {
 } from "../imports"
 import { getLLM } from "../helpers/llms"
 import { structure } from "../magic-funcs/parsers/structure"
-import type { DeepAgentInterrupt, DeepAgentResumeInput } from "../helpers/deepagent/interruptTypes"
+import type {
+    DeepAgentInterrupt,
+    DeepAgentRunInputBase,
+    DeepAgentHitlFields,
+    DeepAgentUserDecision,
+} from "../helpers/deepagent/interruptTypes"
 import {
     createResumeCommand,
     expandResumeDecisions,
@@ -157,7 +162,6 @@ export class DeepAgent<
     private name: string | undefined
     private contextSchema: CreateDeepAgentParams["contextSchema"]
     private should_use_output: boolean = true
-    private lastRunMode = new Map<string, "invoke" | "stream">()
 
     constructor({
         prompt = `Du bist ein hilfreicher Deep Agent.`,
@@ -263,124 +267,28 @@ export class DeepAgent<
         return content
     }
 
-    public async invoke(
-        this: DeepAgent<undefined, TTools, TBackend, undefined>,
-        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
-    ): Promise<string>
-    public async invoke<U extends OutputSchema>(
-        this: DeepAgent<U, TTools, TBackend, undefined>,
-        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
-    ): Promise<z.infer<U>>
-    public async invoke<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
-        this: DeepAgent<undefined, TTools, TBackend, I>,
-        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
-    ): Promise<string | DeepAgentInterrupt>
-    public async invoke<U extends OutputSchema, I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
-        this: DeepAgent<U, TTools, TBackend, I>,
-        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
-    ): Promise<z.infer<U> | DeepAgentInterrupt>
-    public async invoke(
-        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
-    ): Promise<string | z.infer<OutputSchema> | DeepAgentInterrupt> {
-        const { thread_id, debug, promptVars, context, ...variables } = invokeInput
-
-        this.validateThreadConfig(thread_id)
-        if (thread_id) this.lastRunMode.set(thread_id, "invoke")
-
-        const humanMessages: HumanMessage[] = Object.entries(variables).map(
-            ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
-        )
-
-        const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
-        const systemPrompt = blocksToSystemPrompt(resolvedPrompt)
-        const agent = await this.ensureAgent(systemPrompt)
-        const config = this.buildConfig(thread_id, context)
-
-        const result = await agent.invoke({ messages: humanMessages } as any, config)
-        if (debug) return result
-
-        return this.mapInvokeResult(result)
-    }
-
-    public stream(
-        this: DeepAgent<T, TTools, TBackend, undefined>,
-        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
-    ): AsyncGenerator<string, void, unknown>
-    public stream<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
-        this: DeepAgent<T, TTools, TBackend, I>,
-        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
-    ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown>
-    public async *stream(
-        invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> },
-    ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown> {
-        this.should_use_output = false
-        try {
-            const { thread_id, promptVars, context, ...variables } = invokeInput
-
-            this.validateThreadConfig(thread_id)
-            if (thread_id) this.lastRunMode.set(thread_id, "stream")
-
-            const humanMessages: HumanMessage[] = Object.entries(variables).map(
-                ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
-            )
-
-            const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
-            const systemPrompt = blocksToSystemPrompt(resolvedPrompt)
-            const agent = await this.ensureAgent(systemPrompt)
-            const config = this.buildConfig(thread_id, context)
-
-            const streamMode = this.interruptOn ? (["messages", "updates"] as const) : "messages"
-            const nativeStream = await agent.stream(
-                { messages: humanMessages } as any,
-                { ...(config ?? {}), streamMode } as any,
-            )
-
-            for await (const chunk of nativeStream) {
-                if (this.interruptOn && Array.isArray(chunk) && chunk.length === 2) {
-                    const [mode, data] = chunk
-                    if (mode === "updates") {
-                        const interrupt = extractInterruptFromStreamUpdate(data)
-                        if (interrupt) {
-                            yield interrupt
-                            return
-                        }
-                        continue
-                    }
-                    if (mode === "messages") {
-                        const text = extractTextFromMessageChunk(data)
-                        if (text) yield text
-                        continue
-                    }
-                }
-
-                const text = extractTextFromMessageChunk(chunk)
-                if (text) yield text
-            }
-        } finally {
-            this.should_use_output = true
-        }
-    }
-
-    public resume(
-        input: DeepAgentResumeInput,
-    ): Promise<string | z.infer<T> | DeepAgentInterrupt> | AsyncGenerator<string | DeepAgentInterrupt, void, unknown> {
+    private validateHitlResume(thread_id: string | undefined, variables: Record<string, unknown>) {
         if (!this.interruptOn) {
-            throw new Error("resume() requires interruptOn to be configured on DeepAgent")
+            throw new Error("decision requires interruptOn to be configured on DeepAgent")
         }
         if (!this.checkpointer) {
-            throw new Error("resume() requires a checkpointer")
+            throw new Error("decision requires a checkpointer")
         }
-
-        const mode = this.lastRunMode.get(input.thread_id) ?? "invoke"
-        if (mode === "stream") {
-            return this.resumeStream(input)
+        if (!thread_id) {
+            throw new Error("thread_id is required when resuming with decision")
         }
-        return this.resumeInvoke(input)
+        if (Object.keys(variables).length > 0) {
+            throw new Error("use decision or input, not both")
+        }
     }
 
-    private async resumeInvoke(input: DeepAgentResumeInput): Promise<string | z.infer<T> | DeepAgentInterrupt> {
+    private async runResumeInvoke(input: {
+        thread_id: string
+        context?: Record<string, unknown>
+        decision?: DeepAgentUserDecision
+        decisions?: DeepAgentUserDecision[]
+    }): Promise<string | z.infer<T> | DeepAgentInterrupt> {
         const { thread_id, context, decision, decisions } = input
-        this.lastRunMode.set(thread_id, "invoke")
 
         const systemPrompt = blocksToSystemPrompt(this.prompt)
         const agent = await this.ensureAgent(systemPrompt)
@@ -394,9 +302,13 @@ export class DeepAgent<
         return this.mapInvokeResult(result) as Promise<string | z.infer<T> | DeepAgentInterrupt>
     }
 
-    private async *resumeStream(input: DeepAgentResumeInput): AsyncGenerator<string | DeepAgentInterrupt, void, unknown> {
+    private async *runResumeStream(input: {
+        thread_id: string
+        context?: Record<string, unknown>
+        decision?: DeepAgentUserDecision
+        decisions?: DeepAgentUserDecision[]
+    }): AsyncGenerator<string | DeepAgentInterrupt, void, unknown> {
         const { thread_id, context, decision, decisions } = input
-        this.lastRunMode.set(thread_id, "stream")
         this.should_use_output = false
 
         try {
@@ -439,6 +351,131 @@ export class DeepAgent<
         }
     }
 
+    public async invoke(
+        this: DeepAgent<undefined, TTools, TBackend, undefined>,
+        invokeInput: DeepAgentRunInputBase,
+    ): Promise<string>
+    public async invoke<U extends OutputSchema>(
+        this: DeepAgent<U, TTools, TBackend, undefined>,
+        invokeInput: DeepAgentRunInputBase,
+    ): Promise<z.infer<U>>
+    public async invoke<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
+        this: DeepAgent<undefined, TTools, TBackend, I>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
+    ): Promise<string | DeepAgentInterrupt>
+    public async invoke<U extends OutputSchema, I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
+        this: DeepAgent<U, TTools, TBackend, I>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
+    ): Promise<z.infer<U> | DeepAgentInterrupt>
+    public async invoke(
+        invokeInput: DeepAgentRunInputBase & Partial<DeepAgentHitlFields>,
+    ): Promise<string | z.infer<OutputSchema> | DeepAgentInterrupt> {
+        const { thread_id, decision, decisions, context, debug, promptVars, ...variables } = invokeInput
+        const isResume = decision !== undefined || decisions !== undefined
+
+        if (isResume) {
+            this.validateHitlResume(thread_id, variables)
+            return this.runResumeInvoke({
+                thread_id: thread_id!,
+                context,
+                decision,
+                decisions,
+            }) as Promise<string | z.infer<OutputSchema> | DeepAgentInterrupt>
+        }
+
+        this.validateThreadConfig(thread_id)
+        if (Object.keys(variables).length === 0) {
+            throw new Error("input required")
+        }
+
+        const humanMessages: HumanMessage[] = Object.entries(variables).map(
+            ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
+        )
+
+        const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
+        const systemPrompt = blocksToSystemPrompt(resolvedPrompt)
+        const agent = await this.ensureAgent(systemPrompt)
+        const config = this.buildConfig(thread_id, context)
+
+        const result = await agent.invoke({ messages: humanMessages } as any, config)
+        if (debug) return result
+
+        return this.mapInvokeResult(result)
+    }
+
+    public stream(
+        this: DeepAgent<T, TTools, TBackend, undefined>,
+        invokeInput: DeepAgentRunInputBase,
+    ): AsyncGenerator<string, void, unknown>
+    public stream<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
+        this: DeepAgent<T, TTools, TBackend, I>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
+    ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown>
+    public async *stream(
+        invokeInput: DeepAgentRunInputBase & Partial<DeepAgentHitlFields>,
+    ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown> {
+        const { thread_id, decision, decisions, context, promptVars, ...variables } = invokeInput
+        const isResume = decision !== undefined || decisions !== undefined
+
+        if (isResume) {
+            this.validateHitlResume(thread_id, variables)
+            yield* this.runResumeStream({
+                thread_id: thread_id!,
+                context,
+                decision,
+                decisions,
+            })
+            return
+        }
+
+        this.should_use_output = false
+        try {
+            this.validateThreadConfig(thread_id)
+            if (Object.keys(variables).length === 0) {
+                throw new Error("input required")
+            }
+
+            const humanMessages: HumanMessage[] = Object.entries(variables).map(
+                ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
+            )
+
+            const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
+            const systemPrompt = blocksToSystemPrompt(resolvedPrompt)
+            const agent = await this.ensureAgent(systemPrompt)
+            const config = this.buildConfig(thread_id, context)
+
+            const streamMode = this.interruptOn ? (["messages", "updates"] as const) : "messages"
+            const nativeStream = await agent.stream(
+                { messages: humanMessages } as any,
+                { ...(config ?? {}), streamMode } as any,
+            )
+
+            for await (const chunk of nativeStream) {
+                if (this.interruptOn && Array.isArray(chunk) && chunk.length === 2) {
+                    const [mode, data] = chunk
+                    if (mode === "updates") {
+                        const interrupt = extractInterruptFromStreamUpdate(data)
+                        if (interrupt) {
+                            yield interrupt
+                            return
+                        }
+                        continue
+                    }
+                    if (mode === "messages") {
+                        const text = extractTextFromMessageChunk(data)
+                        if (text) yield text
+                        continue
+                    }
+                }
+
+                const text = extractTextFromMessageChunk(chunk)
+                if (text) yield text
+            }
+        } finally {
+            this.should_use_output = true
+        }
+    }
+
     public addTool(tool: DynamicStructuredTool) {
         ;(this.tools as unknown as DynamicStructuredTool[]).push(tool)
         this.markAgentDirty()
@@ -448,5 +485,3 @@ export class DeepAgent<
         return (this.tools as unknown as DynamicStructuredTool[]).map(tool => tool.name)
     }
 }
-
-export type { DeepAgentResumeInput } from "../helpers/deepagent/interruptTypes"

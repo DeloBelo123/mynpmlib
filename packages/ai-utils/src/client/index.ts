@@ -5,7 +5,8 @@ export type {
     DeepAgentInterruptBatch,
     DeepAgentStreamChunk,
     DeepAgentUserDecision,
-    DeepAgentResumeInput,
+    DeepAgentRunInputBase,
+    DeepAgentHitlFields,
 } from "../helpers/deepagent/interruptTypes"
 
 import type { DeepAgentInterrupt } from "../helpers/deepagent/interruptTypes"
