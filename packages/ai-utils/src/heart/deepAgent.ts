@@ -15,8 +15,32 @@ import {
 } from "../imports"
 import { getLLM } from "../helpers/llms"
 import { structure } from "../magic-funcs/parsers/structure"
+import type {
+    DeepAgentInterruptableToolName,
+    InterruptOnFor,
+} from "../helpers/deepagent/interruptOn"
 
-type DeepAgentInterruptOn = NonNullable<CreateDeepAgentParams["interruptOn"]>
+interface DeepAgentProps<
+    T extends OutputSchema | undefined = undefined,
+    TTools extends readonly DynamicStructuredTool[] = readonly [],
+    TBackend = undefined,
+> {
+    tools?: TTools
+    prompt?: string | Array<string>
+    llm?: BaseChatModel
+    output?: T
+    checkpointer?: BaseCheckpointSaver | boolean
+    agentsMd?: string[]
+    subagents?: SubAgent[]
+    backend?: TBackend
+    permissions?: FilesystemPermission[]
+    skills?: string[]
+    middleware?: AgentMiddleware[]
+    interruptOn?: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>
+    store?: BaseStore
+    name?: string
+    contextSchema?: CreateDeepAgentParams["contextSchema"]
+}
 
 async function resolveSystemPromptBlocks(
     blocks: Array<["system", string]>,
@@ -41,77 +65,28 @@ function blocksToSystemPrompt(blocks: Array<["system", string]>): string {
     return blocks.map(([, text]) => text).join("\n\n")
 }
 
-interface DeepAgentProps<T extends OutputSchema | undefined = undefined> {
-    tools?: DynamicStructuredTool[]
-    prompt?: string | Array<string>
-    llm?: BaseChatModel
-    output?: T
-    checkpointer?: BaseCheckpointSaver | boolean
-    agentsMd?: string[]
-    subagents?: SubAgent[]
-    backend?: CreateDeepAgentParams["backend"]
-    permissions?: FilesystemPermission[]
-    skills?: string[]
-    middleware?: AgentMiddleware[]
-    interruptOn?: DeepAgentInterruptOn
-    store?: BaseStore
-    name?: string
-    contextSchema?: CreateDeepAgentParams["contextSchema"]
-}
-
 /**
- * CONSTRUCTOR:
- * @example
- * constructor({
-        prompt = `Du bist ein hilfreicher Deep Agent.`,
-        llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
-        tools = [],
-        output,
-        checkpointer,
-        agentsMd,
-        subagents,
-        backend,
-        permissions,
-        skills,
-        middleware,
-        interruptOn,
-        store,
-        name,
-        contextSchema,
-    }: DeepAgentProps<T> = {} as DeepAgentProps<T>) {
-        this.prompt = typeof prompt === "string"
-            ? [["system", prompt]]
-            : prompt.map((p: string) => ["system", p] as ["system", string])
-        this.tools = tools
-        this.llm = llm
-        this.output = output
-        this.checkpointer = checkpointer
-        this.agentsMd = agentsMd
-        this.subagents = subagents
-        this.backend = backend
-        this.permissions = permissions
-        this.skills = skills
-        this.middleware = middleware
-        this.interruptOn = interruptOn
-        this.store = store
-        this.name = name
-        this.contextSchema = contextSchema
-    }
+ * DeepAgent mit typisiertem `interruptOn` — Keys = Filesystem-Tools + `tools[]` + optional `execute`.
+ * Für Literal-Autocomplete bei Custom-Tools: `tools: [myTool] as const`.
  */
-export class DeepAgent<T extends OutputSchema | undefined = undefined> {
+export class DeepAgent<
+    T extends OutputSchema | undefined = undefined,
+    const TTools extends readonly DynamicStructuredTool[] = readonly [],
+    TBackend = undefined,
+> {
     private prompt: Array<["system", string]>
-    private tools: DynamicStructuredTool[]
+    private tools: TTools
     private llm: BaseChatModel
     private output: T | undefined
     private agent: any
     private checkpointer: BaseCheckpointSaver | boolean | undefined
     private agentsMd: string[] | undefined
     private subagents: SubAgent[] | undefined
-    private backend: CreateDeepAgentParams["backend"]
+    private backend: TBackend | undefined
     private permissions: FilesystemPermission[] | undefined
     private skills: string[] | undefined
     private middleware: AgentMiddleware[] | undefined
-    private interruptOn: DeepAgentInterruptOn | undefined
+    private interruptOn: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>> | undefined
     private store: BaseStore | undefined
     private name: string | undefined
     private contextSchema: CreateDeepAgentParams["contextSchema"]
@@ -120,7 +95,7 @@ export class DeepAgent<T extends OutputSchema | undefined = undefined> {
     constructor({
         prompt = `Du bist ein hilfreicher Deep Agent.`,
         llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
-        tools = [],
+        tools = [] as unknown as TTools,
         output,
         checkpointer,
         agentsMd,
@@ -133,7 +108,7 @@ export class DeepAgent<T extends OutputSchema | undefined = undefined> {
         store,
         name,
         contextSchema,
-    }: DeepAgentProps<T> = {} as DeepAgentProps<T>) {
+    }: DeepAgentProps<T, TTools, TBackend> = {} as DeepAgentProps<T, TTools, TBackend>) {
         this.prompt = typeof prompt === "string"
             ? [["system", prompt]]
             : prompt.map((p: string) => ["system", p] as ["system", string])
@@ -153,8 +128,8 @@ export class DeepAgent<T extends OutputSchema | undefined = undefined> {
         this.contextSchema = contextSchema
     }
 
-    public async invoke(this: DeepAgent<undefined>, invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> }): Promise<string>
-    public async invoke<U extends OutputSchema>(this: DeepAgent<U>, invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> }): Promise<z.infer<U>>
+    public async invoke(this: DeepAgent<undefined, TTools, TBackend>, invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> }): Promise<string>
+    public async invoke<U extends OutputSchema>(this: DeepAgent<U, TTools, TBackend>, invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> }): Promise<z.infer<U>>
     public async invoke(invokeInput: InvokeInputBase & { thread_id?: string; context?: Record<string, any> }): Promise<string | z.infer<OutputSchema>> {
         const { thread_id, debug, promptVars, context, ...variables } = invokeInput
 
@@ -180,11 +155,11 @@ export class DeepAgent<T extends OutputSchema | undefined = undefined> {
             ...(this.checkpointer !== undefined ? { checkpointer: this.checkpointer } : {}),
             ...(this.agentsMd ? { memory: this.agentsMd } : {}),
             ...(this.subagents ? { subagents: this.subagents } : {}),
-            ...(this.backend ? { backend: this.backend } : {}),
+            ...(this.backend ? { backend: this.backend as any } : {}),
             ...(this.permissions ? { permissions: this.permissions } : {}),
             ...(this.skills ? { skills: this.skills } : {}),
             ...(this.middleware ? { middleware: this.middleware as any } : {}),
-            ...(this.interruptOn ? { interruptOn: this.interruptOn } : {}),
+            ...(this.interruptOn ? { interruptOn: this.interruptOn as any } : {}),
             ...(this.store ? { store: this.store } : {}),
             ...(this.name ? { name: this.name } : {}),
             ...(this.contextSchema ? { contextSchema: this.contextSchema as any } : {}),
@@ -242,11 +217,11 @@ export class DeepAgent<T extends OutputSchema | undefined = undefined> {
                 ...(this.checkpointer !== undefined ? { checkpointer: this.checkpointer } : {}),
                 ...(this.agentsMd ? { memory: this.agentsMd } : {}),
                 ...(this.subagents ? { subagents: this.subagents } : {}),
-                ...(this.backend ? { backend: this.backend } : {}),
+                ...(this.backend ? { backend: this.backend as any } : {}),
                 ...(this.permissions ? { permissions: this.permissions } : {}),
                 ...(this.skills ? { skills: this.skills } : {}),
                 ...(this.middleware ? { middleware: this.middleware as any } : {}),
-                ...(this.interruptOn ? { interruptOn: this.interruptOn } : {}),
+                ...(this.interruptOn ? { interruptOn: this.interruptOn as any } : {}),
                 ...(this.store ? { store: this.store } : {}),
                 ...(this.name ? { name: this.name } : {}),
                 ...(this.contextSchema ? { contextSchema: this.contextSchema as any } : {}),
@@ -289,10 +264,10 @@ export class DeepAgent<T extends OutputSchema | undefined = undefined> {
     }
 
     public addTool(tool: DynamicStructuredTool) {
-        this.tools.push(tool)
+        ;(this.tools as unknown as DynamicStructuredTool[]).push(tool)
     }
 
     public get currentTools(): string[] {
-        return this.tools.map(tool => tool.name)
+        return (this.tools as unknown as DynamicStructuredTool[]).map(tool => tool.name)
     }
 }

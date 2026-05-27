@@ -32,7 +32,7 @@ import { RecursiveCharacterTextSplitter, CharacterTextSplitter } from '@langchai
 
 // Agents
 import { createReactAgent, ToolNode } from '@langchain/langgraph/prebuilt'
-import { MemorySaver, BaseCheckpointSaver } from '@langchain/langgraph'
+import { MemorySaver, BaseCheckpointSaver, Command } from '@langchain/langgraph'
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres'
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite'
 import { type Checkpoint, type CheckpointMetadata, type LangGraphRunnableConfig } from "@langchain/langgraph"
@@ -57,6 +57,12 @@ import { InMemoryStore } from "@langchain/langgraph";
 import type { BaseStore } from "@langchain/langgraph";
 import { createMiddleware } from "langchain";
 import type { AgentMiddleware } from "langchain";
+import type {
+    HITLRequest,
+    HITLResponse,
+    Decision as HitlUserDecision,
+    ActionRequest,
+} from "langchain";
 
 import { DenoSandbox } from "@langchain/deno";
 import { DaytonaSandbox } from "@langchain/daytona";
@@ -123,6 +129,7 @@ export {
     ToolNode,
     MemorySaver,
     BaseCheckpointSaver,
+    Command,
 }
 
 // Checkpoint Savers (optional - Packages müssen installiert sein)
@@ -163,6 +170,10 @@ export {
     type BaseStore,
     type CreateDeepAgentParams,
     type DeepAgentInterface,
+    type HITLRequest,
+    type HITLResponse,
+    type HitlUserDecision,
+    type ActionRequest,
 }
 
 // Sandboxes
@@ -175,3 +186,6 @@ export {
 export {
     z
 }
+
+
+

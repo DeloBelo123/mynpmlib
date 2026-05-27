@@ -1,20 +1,92 @@
-import type { CreateDeepAgentParams } from "../../imports"
+import { Command, type HITLRequest, type HITLResponse, type HitlUserDecision } from "../../imports"
+import type { CreateDeepAgentParams, DynamicStructuredTool } from "../../imports"
+import type { LocalShellBackend } from "deepagents"
+import type { DenoSandbox } from "@langchain/deno"
+import type { DaytonaSandbox } from "@langchain/daytona"
 
-export type InterruptOn = NonNullable<CreateDeepAgentParams["interruptOn"]>
+/** Immer verfügbare Filesystem-Tools von DeepAgents (Middleware). */
+export const DEEP_AGENT_FILESYSTEM_TOOLS = [
+    "ls",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "glob",
+    "grep",
+] as const
+
+/** Shell-Tool — nur wenn Backend `execute()` unterstützt (LocalShell, Deno, Daytona). */
+export const DEEP_AGENT_EXECUTE_TOOL = "execute" as const
+
+export type DeepAgentFilesystemTool = (typeof DEEP_AGENT_FILESYSTEM_TOOLS)[number]
+export type DeepAgentExecuteTool = typeof DEEP_AGENT_EXECUTE_TOOL
 export type InterruptDecision = "approve" | "edit" | "reject"
 
 type ToolCallLike = { name: string; args: Record<string, unknown> }
 type InterruptDescription = string | ((toolCall: ToolCallLike) => string | Promise<string>)
 
+type ExecuteCapableBackend = LocalShellBackend | DenoSandbox | DaytonaSandbox
+
+/** Runtime: `execute` nur bei Shell/Sandbox-Backend — nicht bei `createWorkspaceBackend()` / Composite+StateBackend. */
+export type BackendSupportsExecute<TBackend> =
+    TBackend extends ExecuteCapableBackend
+        ? true
+        : TBackend extends Promise<infer P>
+            ? BackendSupportsExecute<P>
+            : false
+
+export type ToolNamesOf<TTools extends readonly { name: string }[]> = {
+    [K in keyof TTools]: TTools[K] extends { name: infer N extends string } ? N : never
+}[number]
+
+export type DeepAgentInterruptableToolName<
+    TTools extends readonly { name: string }[] = readonly [],
+    TBackend = unknown,
+> =
+    | DeepAgentFilesystemTool
+    | ToolNamesOf<TTools>
+    | (BackendSupportsExecute<TBackend> extends true ? DeepAgentExecuteTool : never)
+
+type InterruptOnConfigObject = {
+    allowedDecisions: InterruptDecision[]
+    description?: InterruptDescription
+    argsSchema?: Record<string, unknown>
+}
+
+type InterruptOnEntry = boolean | InterruptOnConfigObject
+
+export type InterruptOnFor<TToolName extends string> = Partial<Record<TToolName, InterruptOnEntry>>
+
+/** Untyped fallback — prefer `InterruptOnFor<DeepAgentInterruptableToolName<...>>` via DeepAgent generics. */
+export type InterruptOn = NonNullable<CreateDeepAgentParams["interruptOn"]>
+
 /**
  * Human-in-the-Loop (`interruptOn`-Prop) — pausiert den Agent **vor** Tool-Ausführung.
  *
- * Das ist **kein** `permissions`-Filesystem-ACL. Keys sind **Tool-Namen** (exakt wie
- * beim `tool({ name: "..." })`). Tools die nicht in der Map stehen, laufen ohne Pause.
+ * Das ist **kein** `permissions`-Filesystem-ACL. Keys sind **Tool-Namen**:
+ * - immer: `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`
+ * - plus deine `tools: []` (mit `as const` für Literal-Autocomplete)
+ * - plus `execute` nur bei Shell/Sandbox-Backend (LocalShell, Deno, Daytona)
  *
- * Braucht `checkpointer` + `thread_id`. Es gibt keine eingebaute UI — du bekommst
- * `result.__interrupt__` und zeigst `actionRequests[].description` selbst an.
- * Fortsetzen mit `Command({ resume: { decisions: [...] } })`.
+ * Braucht `checkpointer` + `thread_id`. Keine eingebaute UI — du liest
+ * `result.__interrupt__` und setzt mit `createResumeCommand()` fort.
+ *
+ * **Nutzung — jede Util returned direkt ein gültiges `interruptOn`-Objekt:**
+ *
+ * ```ts
+ * // 1) Ein Tool oder mehrere mit gleicher Regel → direkt zuweisen
+ * interruptOn: requireApproval("read_file", "write_file")
+ * interruptOn: approveOrReject("getCandidates", "Bewerberdaten abrufen?")
+ * interruptOn: filesystemWritesRequireApproval()
+ *
+ * // 2) Verschiedene Regeln pro Tool → mergeInterruptOn (kein Spread nötig)
+ * interruptOn: mergeInterruptOn(
+ *     approveOrReject("getCandidates", "..."),
+ *     requireApproval("execute"),
+ * )
+ * ```
+ *
+ * Pro Tool-Name nur **ein** Key im Objekt — doppelte Keys würden sich überschreiben.
+ * Tools die nicht in der Map stehen, laufen ohne Pause (auto-approve).
  */
 
 /**
@@ -22,127 +94,230 @@ type InterruptDescription = string | ((toolCall: ToolCallLike) => string | Promi
  * Default-Text: "Tool execution requires approval" + Tool-Name + Args.
  *
  * @example
- * interruptOn: {
- *     ...requireApproval("getCandidates", "deleteCandidate"),
- * }
+ * new DeepAgent({
+ *     checkpointer: new MemorySaver(),
+ *     interruptOn: requireApproval("getCandidates", "read_file"),
+ * })
  */
-export function requireApproval(...toolNames: string[]): InterruptOn {
-    return Object.fromEntries(toolNames.map((name) => [name, true]))
+export function requireApproval<const T extends string>(
+    ...toolNames: T[]
+): InterruptOnFor<T> {
+    return Object.fromEntries(toolNames.map((name) => [name, true])) as InterruptOnFor<T>
 }
 
 /**
  * Tool explizit ohne Pause — läuft sofort durch.
- * Nützlich wenn du viele Tools pausieren willst und einzelne ausnahmen musst.
+ * Meist innerhalb von `mergeInterruptOn()` — selten alleine als ganzes `interruptOn`.
  *
  * @example
- * interruptOn: {
- *     ...requireApproval("getCandidates"),
- *     ...autoApprove("ping"),
- * }
+ * interruptOn: mergeInterruptOn(
+ *     requireApproval("getCandidates"),
+ *     autoApprove("ping"),
+ * )
  */
-export function autoApprove(...toolNames: string[]): InterruptOn {
-    return Object.fromEntries(toolNames.map((name) => [name, false]))
+export function autoApprove<const T extends string>(
+    ...toolNames: T[]
+): InterruptOnFor<T> {
+    return Object.fromEntries(toolNames.map((name) => [name, false])) as InterruptOnFor<T>
 }
 
 /**
  * Pause mit eigenem Text. User darf nur approve oder reject (kein edit).
- * Typisch für sensible Aktionen: Daten lesen, löschen, versenden.
  *
  * @example
- * interruptOn: {
- *     ...approveOrReject(
+ * new DeepAgent({
+ *     checkpointer: new MemorySaver(),
+ *     interruptOn: approveOrReject(
  *         "getCandidates",
  *         "Der Agent möchte Bewerberdaten abrufen. Erlauben?",
  *     ),
- * }
+ * })
  */
-export function approveOrReject(toolName: string, description?: string): InterruptOn {
+export function approveOrReject<const T extends string>(
+    toolName: T,
+    description?: string,
+): InterruptOnFor<T> {
     return {
         [toolName]: {
             allowedDecisions: ["approve", "reject"],
             ...(description ? { description } : {}),
         },
-    }
-}
-
-/**
- * Pause mit voller Kontrolle über Text und erlaubte User-Entscheidungen.
- *
- * @example
- * interruptOn: {
- *     ...requireApprovalWithDescription(
- *         "updateCandidateStatus",
- *         "Status-Änderung bestätigen?",
- *         ["approve", "reject"],
- *     ),
- * }
- */
-export function requireApprovalWithDescription(
-    toolName: string,
-    description: InterruptDescription,
-    allowedDecisions: InterruptDecision[] = ["approve", "edit", "reject"],
-): InterruptOn {
-    return {
-        [toolName]: {
-            allowedDecisions,
-            description,
-        },
-    }
+    } as InterruptOnFor<T>
 }
 
 /**
  * Pause mit Prefix-Text + Tool-Args als JSON (dynamisch pro Call).
  *
  * @example
- * interruptOn: {
- *     ...withToolArgsDescription(
+ * new DeepAgent({
+ *     checkpointer: new MemorySaver(),
+ *     interruptOn: withToolArgsDescription(
  *         "getCandidates",
  *         "Der Agent möchte Bewerber abrufen:",
  *     ),
- * }
+ * })
  */
-export function withToolArgsDescription(
-    toolName: string,
+export function withToolArgsDescription<const T extends string>(
+    toolName: T,
     prefix: string,
     allowedDecisions: InterruptDecision[] = ["approve", "reject"],
-): InterruptOn {
+): InterruptOnFor<T> {
     return {
         [toolName]: {
             allowedDecisions,
-            description: (toolCall) =>
+            description: (toolCall: ToolCallLike) =>
                 `${prefix}\n\nArgs: ${JSON.stringify(toolCall.args, null, 2)}`,
         },
-    }
+    } as InterruptOnFor<T>
 }
 
 /**
- * Mehrere Partial-Configs zu einer `interruptOn`-Map zusammenführen.
+ * Verschiedene Tool-Regeln zu einem `interruptOn`-Objekt zusammenführen.
+ * Nur nötig wenn Tools **unterschiedliche** Configs brauchen — sonst direkt `interruptOn: util()`.
  *
  * @example
- * interruptOn: mergeInterruptOn(
- *     requireApproval("execute"),
- *     approveOrReject("getCandidates", "Bewerberdaten abrufen?"),
- *     withToolArgsDescription("sendEmail", "E-Mail senden:"),
- * )
+ * const sandbox = await createDenoSandbox()
+ * new DeepAgent({
+ *     tools: [getCandidates] as const,
+ *     backend: sandbox,
+ *     checkpointer: new MemorySaver(),
+ *     interruptOn: mergeInterruptOn(
+ *         requireApproval("execute"),
+ *         approveOrReject("getCandidates", "Bewerberdaten abrufen?"),
+ *     ),
+ * })
  */
-export function mergeInterruptOn(...configs: InterruptOn[]): InterruptOn {
-    return Object.assign({}, ...configs)
+export function mergeInterruptOn<const T extends string>(
+    ...configs: Array<Partial<Record<T, InterruptOnEntry>>>
+): Partial<Record<T, InterruptOnEntry>> {
+    return Object.assign({}, ...configs) as Partial<Record<T, InterruptOnEntry>>
 }
 
 /**
  * Preset: `write_file` und `edit_file` brauchen User-Freigabe.
  *
  * @example
- * const deepAgent = new DeepAgent({
+ * new DeepAgent({
  *     checkpointer: new MemorySaver(),
  *     interruptOn: filesystemWritesRequireApproval(),
  * })
  */
 export function filesystemWritesRequireApproval(
     description = "Datei-Schreiboperation — bitte bestätigen.",
-): InterruptOn {
-    return mergeInterruptOn(
-        requireApprovalWithDescription("write_file", description),
-        requireApprovalWithDescription("edit_file", description),
+): InterruptOnFor<"write_file" | "edit_file"> {
+    return {
+        write_file: {
+            allowedDecisions: ["approve", "edit", "reject"],
+            description,
+        },
+        edit_file: {
+            allowedDecisions: ["approve", "edit", "reject"],
+            description,
+        },
+    }
+}
+
+export type InferInterruptOn<
+    TTools extends readonly DynamicStructuredTool[] = readonly DynamicStructuredTool[],
+    TBackend = unknown,
+> = InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>
+
+type InterruptResult = { __interrupt__?: Array<{ value: HITLRequest }> }
+
+/**
+ * Prüft ob ein Agent-Result pausiert hat (Human-in-the-Loop).
+ *
+ * @example
+ * const result = await agent.invoke(input, { configurable: { thread_id: "1" } })
+ * if (isInterruptResult(result)) {
+ *     const hitl = getHitlRequest(result)
+ * }
+ */
+export function isInterruptResult(result: unknown): result is InterruptResult & { __interrupt__: NonNullable<InterruptResult["__interrupt__"]> } {
+    return (
+        typeof result === "object"
+        && result !== null
+        && "__interrupt__" in result
+        && Array.isArray((result as InterruptResult).__interrupt__)
+        && ((result as InterruptResult).__interrupt__?.length ?? 0) > 0
     )
+}
+
+/**
+ * Liest die HITL-Daten aus einem pausierten Result (`actionRequests`, `reviewConfigs`).
+ *
+ * @example
+ * const hitl = getHitlRequest(result)
+ * console.log(hitl?.actionRequests[0].description)
+ */
+export function getHitlRequest(result: InterruptResult): HITLRequest | undefined {
+    return result.__interrupt__?.[0]?.value
+}
+
+/**
+ * Einzelne User-Entscheidungen für `createResumeCommand()`.
+ *
+ * @example
+ * createResumeCommand([approveDecision(), rejectDecision("Kein Zugriff")])
+ */
+export function approveDecision(): HitlUserDecision {
+    return { type: "approve" }
+}
+
+export function rejectDecision(message?: string): HitlUserDecision {
+    return message ? { type: "reject", message } : { type: "reject" }
+}
+
+export function editDecision(name: string, args: Record<string, unknown>): HitlUserDecision {
+    return { type: "edit", editedAction: { name, args } }
+}
+
+/**
+ * Alle pending Actions auf einmal approven.
+ * Anzahl muss zu `actionRequests.length` passen.
+ *
+ * @example
+ * createResumeCommand(approveAll(hitl.actionRequests.length))
+ */
+export function approveAll(count: number): HITLResponse {
+    return {
+        decisions: Array.from({ length: count }, () => approveDecision()),
+    }
+}
+
+/**
+ * Erstellt den LangGraph-`Command` zum Fortsetzen nach einem Interrupt.
+ * **Pflicht** — ohne zweiten `invoke` mit diesem Command bleibt der Agent pausiert.
+ *
+ * Import: `Command` aus `@langchain/langgraph` (exportiert via `@delofarag/ai-utils`).
+ *
+ * @example
+ * import { createResumeCommand, approveAll, getHitlRequest, isInterruptResult } from "@delofarag/ai-utils"
+ *
+ * const config = { configurable: { thread_id: "session-1" } }
+ * let result = await agent.invoke({ messages: [...] }, config)
+ *
+ * while (isInterruptResult(result)) {
+ *     const hitl = getHitlRequest(result)!
+ *     // UI: hitl.actionRequests anzeigen, User entscheidet...
+ *     result = await agent.invoke(
+ *         createResumeCommand(approveAll(hitl.actionRequests.length)),
+ *         config,
+ *     )
+ * }
+ *
+ * @example
+ * // Einzelne Entscheidung
+ * await agent.invoke(
+ *     createResumeCommand([approveDecision()]),
+ *     config,
+ * )
+ */
+export function createResumeCommand(
+    decisions: HitlUserDecision[] | HITLResponse,
+): Command {
+    const resume: HITLResponse = Array.isArray(decisions)
+        ? { decisions }
+        : decisions
+    return new Command({ resume })
 }
