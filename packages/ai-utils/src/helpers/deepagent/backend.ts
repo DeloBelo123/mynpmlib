@@ -17,7 +17,7 @@ type Prettify<T> = {
 
 export type CreateLocalShellBackendOptions = Prettify<
     Omit<LocalShellBackendOptions, "rootDir"> & {
-        route: string
+        route?: string
         rootDir: string
     }
 >
@@ -82,12 +82,12 @@ export function createFilesystemBackend({
 }
  */
 export function createWorkspaceBackend({
-    route,
     rootDir,
     virtualMode = true,
+    route = "/workspace/",
 }: {
     rootDir: string
-    route: string
+    route?: string
     virtualMode?: boolean
 }): CompositeBackend {
     const normalizedRoute = route.endsWith("/") ? route : `${route}/`
@@ -124,8 +124,8 @@ export function createWorkspaceBackend({
 }
  */
 export async function createLocalShellBackend({
-    route,
     rootDir,
+    route = "/workspace/",
     virtualMode = true,
     ...options
 }: CreateLocalShellBackendOptions): Promise<CompositeBackend & ExecuteCapableDeepAgentBackend> {

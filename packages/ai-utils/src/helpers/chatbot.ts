@@ -1,14 +1,15 @@
 import { input } from "@delofarag/base-utils/server"
 import { logChunk } from "./helpers"
 import { isInterrupt } from "../client/index"
-import type { DeepAgentStreamChunk, DeepAgentUserDecision } from "./deepagent/interruptTypes"
+import type { DeepAgentStreamChunkWithTools, DeepAgentUserDecision } from "./deepagent/interruptTypes"
 
 type SessionStreamable = {
     stream(input: {
         input?: string
         thread_id: string
         decision?: DeepAgentUserDecision
-    }): AsyncIterable<DeepAgentStreamChunk>
+        showToolCalls?: true
+    }): AsyncIterable<DeepAgentStreamChunkWithTools>
 }
 
 type SessionProps = {
@@ -65,20 +66,27 @@ export async function session({
                 break
             }
 
-            const streamInput = pendingInterrupt && isDeepAgent
+            const deepAgentStreamOpts = isDeepAgent ? { showToolCalls: true as const } : {}
+            const decision = pendingInterrupt && isDeepAgent
+                ? parseDeepAgentDecision(message)
+                : undefined
+
+            if (pendingInterrupt && isDeepAgent && !decision) {
+                console.log("Pending interrupt. Bitte antworte mit approve oder reject.")
+                continue
+            }
+
+            const streamInput = decision !== undefined
                 ? {
                     thread_id: id,
-                    decision: parseDeepAgentDecision(message),
+                    decision,
+                    ...deepAgentStreamOpts,
                 }
                 : {
                     input: message,
                     thread_id: id,
+                    ...deepAgentStreamOpts,
                 }
-
-            if (pendingInterrupt && isDeepAgent && !streamInput.decision) {
-                console.log("Pending interrupt. Bitte antworte mit approve oder reject.")
-                continue
-            }
 
             pendingInterrupt = false
             const response = streamable.stream(streamInput)

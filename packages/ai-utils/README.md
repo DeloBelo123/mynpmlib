@@ -2,7 +2,7 @@
 
 Ein praktisches Utility-Package für LLM-Apps mit LangChain:
 
-- `Chain`, `Agent`, `DeepAgent`
+- `Chain`, `Agent`, `DeepAgent` (Filesystem, HITL, Sandboxes, Subagents)
 - Memory via Checkpoint-Saver (`MemorySaver`, `SmartCheckpointSaver`, `SupabaseCheckpointSaver`)
 - RAG-Helper (FAISS, Supabase, In-Memory)
 - Tooling (`ToolRegistry`, `CombinedToolRegistry`, `ZodiosToolRegistry`, `createRAGTool`, `tavilySearchTool`)
@@ -94,6 +94,8 @@ getLLM({ provider: "openrouter", dataSafe: true })
 ---
 
 ## Core Classes
+
+> **DeepAgent-Dokumentation:** Abschnitt [3) DeepAgent](#3-deepagent) — Feature-Übersicht, Backend, HITL, Stream-Chunks, CLI-Testing.
 
 ## 1) `Chain`
 
@@ -249,54 +251,380 @@ for await (const chunk of agent.stream({ input: "Erkläre mir das.", thread_id: 
 
 ## 3) `DeepAgent`
 
-LangChain Deep Agent auf Basis von `createDeepAgent()`. Bringt Filesystem, Planning, Subagents und optional Sandboxes mit.
+LangChain Deep Agent (`createDeepAgent()`) als typisierte Wrapper-Klasse. Für autonome Tasks mit Filesystem, Planning, Subagents und optional Sandboxes.
 
-### Basis
+### DeepAgent auf einen Blick
+
+| Feature | Kurz erklärt |
+|---|---|
+| **Filesystem-Tools** | `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep` (built-in) |
+| **Custom Tools** | Eigene Tools via `ToolRegistry` / `DynamicStructuredTool` |
+| **`execute`** | Shell-Befehle — nur mit Shell/Sandbox-Backend (`createLocalShellBackend`, Deno, Daytona) |
+| **`backend`** | Wo Dateien physisch liegen + wie der Agent Pfade sieht |
+| **`permissions`** | Statische FS-Regeln (allow/deny) — **kein** User-Dialog |
+| **`interruptOn`** | Human-in-the-Loop — pausiert **vor** Tool-Ausführung, User entscheidet |
+| **`checkpointer` + `thread_id`** | Conversation-State über Runs hinweg (Pflicht für HITL) |
+| **`invoke` / `stream`** | Gleiche API für Message **und** HITL-Resume via `decision` |
+| **`showToolCalls`** | Streamt `[tool:start]` / `[tool:end]` Events (nur `stream()`) |
+| **`agentsMd`** | AGENTS.md-Dateien als Startup-Kontext |
+| **`subagents`** | Delegation an spezialisierte Sub-Agents |
+| **`skills`** | Skill-Dateien vom Backend laden |
+| **`output`** | Optional strukturierter Zod-Output |
+
+### Wann `DeepAgent` statt `Agent`?
+
+| | `Agent` | `DeepAgent` |
+|---|---|---|
+| Tool-using ReAct | ja | ja |
+| Built-in Filesystem | nein | ja |
+| Backend / Sandbox | nein | ja |
+| Subagents / Skills | nein | ja |
+| HITL (`interruptOn`) | nein | ja |
+| Typischer Use-Case | Chatbots, API-Tools | Coding Agents, autonome Tasks |
+
+---
+
+### Alle Props
+
+`DeepAgent` wrappt intern LangChains `createDeepAgent()`. Die Tabelle unten listet die Props, die du über `@delofarag/ai-utils` setzt — für den **vollen Einblick aller nativen Parameter** (z. B. `cache`, `debug`, Middleware-Details, Backend-Protokolle) in die **LangChain Deep Agents Docs** schauen:
+
+- [Deep Agents Overview](https://docs.langchain.com/oss/javascript/deepagents/overview)
+- [`createDeepAgent()` Reference (JS)](https://reference.langchain.com/javascript/deepagents/agent/createDeepAgent)
+
+Einige Namen weichen in ai-utils ab: `prompt` → `systemPrompt`, `agentsMd` → `memory`, `interruptOn` → `interrupt_on`.
 
 ```ts
+new DeepAgent({
+    prompt,           // string | string[] — System-Prompt(s)
+    llm,              // BaseChatModel (Default: OpenRouter gpt-5.4-mini)
+    tools,            // readonly DynamicStructuredTool[] (z.B. ToolRegistry.allTools)
+    output,           // Zod-Schema für strukturierten Output
+    checkpointer,     // BaseCheckpointSaver | boolean (Default: MemorySaver)
+    backend,          // DeepAgentBackend — siehe Backend-Abschnitt
+    permissions,      // FilesystemPermission[] — statische FS-Regeln
+    interruptOn,      // pro Tool: decisions + question (HITL)
+    agentsMd,         // string[] — Pfade zu AGENTS.md
+    subagents,        // SubAgent[]
+    skills,           // string[] — Skill-Pfade relativ zum Backend
+    middleware,       // AgentMiddleware[]
+    store,            // BaseStore — LangGraph Store
+    name,             // Agent-Name
+    contextSchema,    // Runtime-Context-Schema
+})
+```
+
+**Wichtig:** `backend` erwartet eine **Instanz** (oder Factory) — kein `Promise`. Async Backends vorher mit `await` erstellen:
+
+```ts
+// ❌ backend: createLocalShellBackend({ ... })
+// ✅ backend: await createLocalShellBackend({ ... })
+```
+
+Typ: `DeepAgentBackend` (= native deepagents `AnyBackendProtocol | Factory`).
+
+---
+
+### Basis: Coding Agent mit isoliertem Workspace
+
+```ts
+import path from "node:path"
 import {
     DeepAgent,
-    createWorkspaceBackend,
+    createLocalShellBackend,
     workspacePermissions,
+    ToolRegistry,
     MemorySaver,
     getLLM,
 } from "@delofarag/ai-utils"
+import { z } from "zod/v4"
 
-const deepAgent = new DeepAgent({
+const tools = new ToolRegistry([
+    {
+        name: "get_weather",
+        description: "Wetter für eine Stadt",
+        schema: z.object({ city: z.string() }),
+        func: async ({ city }) => `${city}: sonnig`,
+    },
+]).allTools
+
+const agent = new DeepAgent({
     llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
-    prompt: "Du bist ein Coding Agent.",
-    tools: [...],
-    backend: createWorkspaceBackend({ rootDir: process.cwd() }),
-    permissions: workspacePermissions(),
+    prompt: "Du bist ein Coding Agent. Arbeite nur im Workspace.",
+    tools,
     checkpointer: new MemorySaver(),
+    backend: await createLocalShellBackend({
+        rootDir: path.join(process.cwd(), "coding_space"),
+        route: "/workspace/",
+    }),
+    permissions: workspacePermissions("/workspace/"),
 })
 
-const answer = await deepAgent.invoke({
-    input: "Analysiere src/heart/agent.ts",
-    thread_id: "u1",
+const answer = await agent.invoke({
+    input: "Erstelle eine kleine HTML-Seite",
+    thread_id: "session-1",
 })
 ```
+
+---
+
+### Backend: `rootDir` vs `route`
+
+Zwei getrennte Konzepte — oft verwechselt:
+
+| Prop | Bedeutung | Beispiel |
+|---|---|---|
+| **`rootDir`** | Echter Ordner auf der Festplatte | `"./coding_space"` oder absoluter Pfad |
+| **`route`** | Virtueller Pfad, den der **Agent sieht** | `"/workspace/"` |
+
+Mapping:
+
+```
+Agent schreibt:  /workspace/index.html
+                         ↓
+Physisch auf Disk: coding_space/index.html
+```
+
+Der Agent kennt `coding_space` nicht — nur `/workspace/`. Du entscheidest mit `rootDir`, wo Dateien wirklich landen.
+
+**Relative Pfade für `rootDir` funktionieren** — deepagents resolved sie via `path.resolve(rootDir)`.
+
+---
+
+### Backend-Helper
+
+| Helper | Async? | `execute`? | Wofür |
+|---|---|---|---|
+| `createStateBackend()` | nein | nein | Ephemeral — Dateien nur im Agent-State |
+| `createFilesystemBackend({ rootDir })` | nein | nein | Direktes FS ohne StateBackend |
+| `createWorkspaceBackend({ rootDir, route? })` | nein | nein | StateBackend + FS unter `route` (empfohlen für reines Coden) |
+| `createLocalShellBackend({ rootDir, route? })` | **ja** | **ja** | Wie Workspace + Shell auf Host (**nur Dev**) |
+| `createDenoSandbox()` | **ja** | ja | Isolierte Deno-Sandbox |
+| `createDaytonaSandbox()` | **ja** | ja | Isolierte Daytona-Sandbox |
+
+```ts
+// Reines Filesystem (kein Shell)
+backend: createWorkspaceBackend({
+    rootDir: path.join(process.cwd(), "coding_space"),
+    route: "/workspace/",
+})
+
+// Mit Shell (Dev only — execute läuft auf dem Host!)
+backend: await createLocalShellBackend({
+    rootDir: path.join(process.cwd(), "coding_space"),
+    route: "/workspace/",
+})
+```
+
+---
+
+### `permissions` vs `interruptOn`
+
+Zwei verschiedene Sicherheitsmechanismen:
+
+| | `permissions` | `interruptOn` |
+|---|---|---|
+| **Was** | Statische Regeln | User-Dialog vor Tool-Ausführung |
+| **Wann** | Sofort beim Tool-Call | Pause + warte auf Entscheidung |
+| **Tools** | Nur FS: `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep` | Alle konfigurierten Tools inkl. Custom + `execute` |
+| **`execute`** | Wird **nicht** enforced | Kann konfiguriert werden |
+
+Helper für `permissions`:
+
+```ts
+import { workspacePermissions, allowRead, denyWrite } from "@delofarag/ai-utils"
+
+permissions: workspacePermissions("/workspace/")
+// = lesen + schreiben nur unter /workspace/**, sonst deny
+```
+
+---
+
+### Built-in Filesystem-Tools
+
+DeepAgent bringt diese Tools automatisch mit (via deepagents Middleware):
+
+- `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`
+- `execute` — nur wenn Backend Shell/Sandbox unterstützt
+
+Custom Tools aus `ToolRegistry` kommen dazu. Für `interruptOn`-Autocomplete werden alle verfügbaren Tool-Namen typisiert.
+
+---
+
+### `invoke()` — Message und HITL-Resume in einer API
+
+**Normale Message:**
+
+```ts
+const result = await agent.invoke({
+    input: "Analysiere die Codebase",
+    thread_id: "u1",
+})
+// result: string (oder Zod-Output wenn output gesetzt)
+```
+
+**Nach Interrupt — Resume:**
+
+```ts
+let result = await agent.invoke({ input: "Schreib eine Datei", thread_id: "u1" })
+
+if (typeof result === "object" && result.kind === "interrupt") {
+    result = await agent.invoke({
+        thread_id: "u1",
+        decision: "approve",
+    })
+}
+```
+
+**Entscheidungs-Typen (`DeepAgentUserDecision`):**
+
+```ts
+"approve"
+"reject"
+{ type: "reject", message: "Zu gefährlich" }
+{ type: "edit", args: { file_path: "/workspace/safe.txt", content: "..." } }
+```
+
+**Mehrere parallele Tool-Calls (Batch-Interrupt):**
+
+```ts
+await agent.invoke({
+    thread_id: "u1",
+    decisions: ["approve", "approve"],
+})
+```
+
+Regeln:
+- `thread_id` **Pflicht** wenn `checkpointer` gesetzt
+- `decision`/`decisions` und `input` **nicht gleichzeitig**
+- `checkpointer` **Pflicht** für HITL-Resume
+
+---
+
+### Human-in-the-Loop (`interruptOn`)
+
+Pausiert den Agent **vor** Tool-Ausführung. Tools die **nicht** im Objekt stehen, laufen ohne Pause.
+
+```ts
+const agent = new DeepAgent({
+    checkpointer: new MemorySaver(),
+    tools: myTools,
+    interruptOn: {
+        write_file: {
+            decisions: ["approve", "reject"],
+            question: "Datei schreiben?",
+        },
+        edit_file: {
+            decisions: ["approve", "edit", "reject"],
+            question: (call) =>
+                `Editieren?\nPfad: ${call.args.file_path ?? "?"}`,
+        },
+        get_weather: {
+            decisions: ["approve", "reject"],
+            question: (call) => `Wetter für ${call.args.city} abrufen?`,
+        },
+        execute: {
+            decisions: ["approve", "reject"],
+            question: "Shell-Befehl ausführen?",
+        },
+    },
+})
+```
+
+**Config pro Tool:**
+
+| Feld | Typ | Beschreibung |
+|---|---|---|
+| `decisions` | `("approve" \| "edit" \| "reject")[]` | Erlaubte User-Antworten |
+| `question` | `string \| (toolCall) => string` | Frage an den User (statisch oder dynamisch) |
+
+**Typisierte Keys (Autocomplete):** alle FS-Tools + deine Custom-Tools + `execute` (wenn Shell-Backend). Mit `interruptOn` gesetzt liefert `invoke()`/`stream()` zusätzlich `DeepAgentInterrupt`-Chunks.
+
+HITL-Helper (optional, low-level):
+
+```ts
+import {
+    approveDecision,
+    rejectDecision,
+    editDecision,
+    approveAll,
+    createResumeCommand,
+    isInterruptResult,
+    mapResultToInterrupt,
+} from "@delofarag/ai-utils"
+```
+
+---
+
+### `stream()` — Text, Interrupts und Tool-Events
+
+Gleiche Input-API wie `invoke()` — plus optionale Tool-Events:
+
+```ts
+for await (const chunk of agent.stream({
+    input: "Baue eine Website",
+    thread_id: "u1",
+    showToolCalls: true,
+})) {
+    if (typeof chunk === "string") {
+        process.stdout.write(chunk)
+    } else if (chunk.kind === "interrupt") {
+        console.log("Interrupt:", chunk.question)
+        console.log("Decisions:", chunk.decisions)
+    } else if (chunk.kind === "tool") {
+        console.log(`[tool:${chunk.phase}]`, chunk.toolName)
+    }
+}
+```
+
+**Stream-Chunk-Typen:**
+
+| Chunk | Wann | Shape |
+|---|---|---|
+| `string` | LLM-Text-Tokens | `"Hallo..."` |
+| `DeepAgentInterrupt` | HITL-Pause | `{ kind: "interrupt", question, decisions, toolName?, args? }` |
+| `DeepAgentInterruptBatch` | Mehrere Tools gleichzeitig | `{ kind: "interrupt", items: [...] }` |
+| `DeepAgentToolEvent` | Mit `showToolCalls: true` | `{ kind: "tool", phase: "start"\|"end", toolName, args? }` |
+
+**Resume im Stream:**
+
+```ts
+for await (const chunk of agent.stream({
+    thread_id: "u1",
+    decision: "approve",
+    showToolCalls: true,
+})) { ... }
+```
+
+Frontend ohne LangChain-Bundle:
+
+```ts
+import { isInterrupt, isToolEvent } from "@delofarag/ai-utils/client"
+```
+
+---
 
 ### `agentsMd` vs `checkpointer`
 
 | Prop | LangChain-Parameter | Bedeutung |
 |---|---|---|
-| `checkpointer` | `checkpointer` | Thread-State über `thread_id` |
-| `agentsMd` | `memory` | AGENTS.md-Pfade als Startup-Kontext |
+| `checkpointer` | `checkpointer` | Thread-State über `thread_id` (Chat-Verlauf) |
+| `agentsMd` | `memory` | AGENTS.md-Pfade als Startup-Kontext (kein Chat-Memory) |
 
 ```ts
-const deepAgent = new DeepAgent({
+const agent = new DeepAgent({
     agentsMd: ["./AGENTS.md", "./.deepagents/AGENTS.md"],
     checkpointer: new MemorySaver(),
 })
 ```
+
+---
 
 ### Subagents
 
 ```ts
 import { DeepAgent, createSubAgent } from "@delofarag/ai-utils"
 
-const deepAgent = new DeepAgent({
+const agent = new DeepAgent({
     subagents: [
         createSubAgent({
             name: "researcher",
@@ -308,73 +636,65 @@ const deepAgent = new DeepAgent({
 })
 ```
 
-### Sandbox
+---
+
+### Skills
+
+Skill-Dateien vom Backend laden (deepagents native Feature):
+
+```ts
+const agent = new DeepAgent({
+    backend: await createLocalShellBackend({ rootDir: "./coding_space" }),
+    skills: ["./skills/refactor/SKILL.md", "./skills/test/SKILL.md"],
+})
+```
+
+Pfade relativ zum Backend — der Agent kann Skills zur Laufzeit einlesen.
+
+---
+
+### Sandbox (Production)
 
 ```ts
 import { DeepAgent, createDenoSandbox } from "@delofarag/ai-utils"
 
 const sandbox = await createDenoSandbox()
-const deepAgent = new DeepAgent({
+const agent = new DeepAgent({
     backend: sandbox,
+    permissions: workspacePermissions("/workspace/"),
 })
 
 // sandbox.close() wenn fertig
 ```
 
-### Human-in-the-Loop (`interruptOn`)
+---
 
-Pausiert den Agent **vor** Tool-Ausführung. Braucht `checkpointer` + `thread_id`.
+### Runtime-Methoden
 
 ```ts
-import {
-    DeepAgent,
-    MemorySaver,
-    StreamResponse,
-} from "@delofarag/ai-utils"
+agent.addTool(extraTool)       // Tool nachträglich hinzufügen
+agent.currentTools           // string[] — alle registrierten Tool-Namen
+```
+
+---
+
+### API-Route Pattern (NDJSON Stream)
+
+```ts
+import { StreamResponse } from "@delofarag/ai-utils"
 import { isInterrupt } from "@delofarag/ai-utils/client"
 
-const hrAgent = new DeepAgent({
-    checkpointer: new MemorySaver(),
-    interruptOn: {
-        write_file: {
-            decisions: ["approve", "edit", "reject"],
-            question: "Der Agent möchte eine Datei schreiben. Erlauben?",
-        },
-    },
-})
-
-// invoke
-let res = await hrAgent.invoke({ input: "Lösch alte Logs", thread_id: "u1" })
-if (isInterrupt(res)) {
-    res = await hrAgent.invoke({ thread_id: "u1", decision: "approve" })
-}
-
-// stream (NDJSON via StreamResponse)
-for await (const chunk of hrAgent.stream({ input: "Analysiere...", thread_id: "u1" })) {
-    if (isInterrupt(chunk)) break
-    process.stdout.write(chunk)
-}
-
-// API route — gleiche Methode für Message und Resume
+// Gleiche stream()-Methode für Message und HITL-Resume
 return StreamResponse(
-    hrAgent.stream({
-        thread_id: "u1",
+    agent.stream({
+        thread_id,
         ...(decision ? { decision } : { input: message }),
+        showToolCalls: true,
     })
 )
 ```
 
-Frontend: `import { isInterrupt } from "@delofarag/ai-utils/client"` — kein LangChain im Bundle.
-
-Ohne `interruptOn`: invoke/stream liefern plain `string` wie bisher.
-
-### Backend-Helper
-
-- `createStateBackend()`
-- `createFilesystemBackend({ rootDir, virtualMode })`
-- `createWorkspaceBackend({ rootDir, route })`
-- `createLocalShellBackend()` (async, Host-Shell — nur Dev)
-- `createDenoSandbox()` / `createDaytonaSandbox()` (async)
+Response: `Content-Type: application/x-ndjson` — ein JSON-Objekt pro Zeile.
 
 ---
 
@@ -384,9 +704,11 @@ Ohne `interruptOn`: invoke/stream liefern plain `string` wie bisher.
 
 Konvertiert einfache Tool-Definitionen zu `DynamicStructuredTool`:
 
-- `getTool(name)`
-- `getTools(...names)`
-- `allTools`
+- `getTool(name)` — wirft `Error` wenn Tool nicht existiert (kein `undefined`)
+- `getTools(...names)` — mehrere Tools, wirft bei unbekanntem Namen
+- `allTools` — alle Tools als Array
+
+Tool-Namen werden als Literal-Typen erhalten — wichtig für `interruptOn`-Autocomplete bei `new DeepAgent()`.
 
 ```ts
 import { ToolRegistry } from "@delofarag/ai-utils"
@@ -659,32 +981,86 @@ const generated = await generateImages({
 ## Session / Stream Helpers
 
 ```ts
-import { session, StreamResponse } from "@delofarag/ai-utils"
+import { session, StreamResponse, logChunk } from "@delofarag/ai-utils"
 ```
 
-- `session({ streamable, ... })`: CLI-like interactive loop (für `Agent.stream`)
-- `StreamResponse(asyncIterable)`: streambares NDJSON-HTTP-Response-Objekt
+### `session()` — CLI-Testloop
+
+Interaktive Konsole für `Agent.stream()` oder `DeepAgent.stream()`.
+
+| Prop | Default | Beschreibung |
+|---|---|---|
+| `streamable` | — | Objekt mit `.stream({ input, thread_id, ... })` |
+| `breakword` | `"exit"` | Beendet die Session |
+| `id` | Timestamp | Wird als `thread_id` genutzt |
+| `numberOfMessages` | `Infinity` | Max. User+Assistant-Runden |
+| `isDeepAgent` | `false` | HITL-Modus für DeepAgent (siehe unten) |
+
+**Normaler Agent:**
 
 ```ts
 await session({
     streamable: agent,
     breakword: "exit",
-    id: "dev-session-1"
+    id: "dev-session-1",
 })
 ```
+
+**DeepAgent mit HITL + Tool-Logs:**
+
+```ts
+await session({
+    streamable: deepAgent,
+    isDeepAgent: true,
+    id: "dev-session-1",
+})
+```
+
+Mit `isDeepAgent: true` passiert automatisch:
+
+- `showToolCalls: true` — `[tool:start]` / `[tool:end]` in der Konsole
+- Nach einem Interrupt wartet die Session auf deine Entscheidung statt neuer Message
+- Erkannte Antworten: `approve`, `ja`, `ok`, `reject`, `reject: Grund hier`
+- `logChunk()` formatiert Text, Interrupts und Tool-Events lesbar
+
+Flow:
+
+```
+You: Schreib eine Datei
+Assistant: [tool:start] write_file {...}
+           [interrupt] Datei schreiben?
+           decisions: approve, reject
+You: approve
+Assistant: [tool:end] write_file
+           Fertig!
+```
+
+### `StreamResponse()` — NDJSON für HTTP
+
+Wrappt einen `AsyncIterable` als HTTP-Response (`application/x-ndjson`). Jeder Chunk = eine JSON-Zeile. Ideal für `DeepAgent.stream()` in API-Routes.
+
+### `logChunk()`
+
+Hilfsfunktion für Stream-Output in der Konsole — nutzt intern `isInterrupt()` und `isToolEvent()`.
 
 ---
 
 ## Export Overview
 
-Top-level Exports decken u. a. ab:
+Top-level Exports (`@delofarag/ai-utils`):
 
-- Helpers (`helpers`, `memory`, `rag`, `llms`, `chatbot`)
-- Core (`Agent`, `Chain`)
+- Helpers (`helpers`, `memory`, `rag`, `llms`, `chatbot`, `logChunk`)
+- Core (`Agent`, `Chain`, `DeepAgent`)
+- DeepAgent (`createWorkspaceBackend`, `createLocalShellBackend`, `createDenoSandbox`, `workspacePermissions`, `createSubAgent`, `interruptOn`-Helper, alle `DeepAgent*`-Types)
 - Memory (`MemorySaver`, `SmartCheckpointSaver`, `SupabaseCheckpointSaver`, `chatSummarizer`)
 - Tools (`ToolRegistry`, `CombinedToolRegistry`, `ZodiosToolRegistry`, `Tavily`, `RAGTool`)
 - Magic-Funcs (answerers/evaluators/parsers/optimizers)
 - Modalities (`stt`, `tts`, `vision`, `generateImages`)
+
+Client-Subpath (`@delofarag/ai-utils/client`) — ohne LangChain-Bundle, für Frontend:
+
+- Types: `DeepAgentInterrupt`, `DeepAgentToolEvent`, `DeepAgentStreamChunk`, ...
+- Guards: `isInterrupt()`, `isToolEvent()`
 
 ---
 
@@ -694,4 +1070,8 @@ Top-level Exports decken u. a. ab:
 - Für Produktion API-Keys als ENV setzen, nicht hardcoden.
 - Bei langen Chats `SmartCheckpointSaver` am `Agent` verwenden.
 - RAG als Tool im `Agent` ist in der Praxis oft robuster als RAG-only Prompting.
-- `Chain` für stateless Tasks, `Agent` für Tools und Conversation Memory.
+- `Chain` für stateless Tasks, `Agent` für Tools und Conversation Memory, `DeepAgent` für autonome Coding-/Research-Agents.
+- DeepAgent: `rootDir` + `route` klar trennen — Agent sieht nur den virtuellen Pfad.
+- DeepAgent HITL: immer `checkpointer` + `thread_id`; `interruptOn` pro Tool konfigurieren.
+- DeepAgent Shell: `createLocalShellBackend` nur lokal/Dev — `execute` läuft auf dem Host.
+- DeepAgent testen: `session({ streamable: agent, isDeepAgent: true })`.
