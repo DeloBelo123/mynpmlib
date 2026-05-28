@@ -9,16 +9,26 @@ export interface Tool {
     func:(input: any) => any
 }
 
+type NamedDynamicStructuredTool<TName extends string> = DynamicStructuredTool & {
+    name: TName
+}
+
+type RegistryTools<T extends readonly Tool[]> = {
+    [K in keyof T]: T[K] extends { name: infer TName extends string }
+        ? NamedDynamicStructuredTool<TName>
+        : never
+}
+
 export class ToolRegistry<const T extends Tool[]> {
-    private tools:DynamicStructuredTool[]
+    private tools:RegistryTools<T>
     constructor(tools:T){
-        this.tools = tools.map(tool => tool instanceof DynamicStructuredTool ? tool : this.turnToTool(tool)) 
+        this.tools = tools.map(tool => tool instanceof DynamicStructuredTool ? tool : this.turnToTool(tool)) as RegistryTools<T>
         if (this.checkDuplicatedTools()){
             throw new Error(`Error! mehrere tools wurden unter den gleichen Namen registriert!`)
         }
     }
 
-    public getTool(name:ExtractToolNames<T>): DynamicStructuredTool | undefined{
+    public getTool(name:ExtractToolNames<T>): RegistryTools<T>[number] | undefined{
         const tools = this.tools.filter(tool => tool.name.toLowerCase() === name.toLowerCase())
         if (tools.length > 1) {
             throw new Error(`Error! mehrere tools wurden unter den gleichen Namen ${name} registriert!`)
@@ -30,7 +40,7 @@ export class ToolRegistry<const T extends Tool[]> {
         return tools[0]
     }
 
-    public getTools(...names:ExtractToolNames<T>[]){
+    public getTools(...names:ExtractToolNames<T>[]): Array<RegistryTools<T>[number] | undefined>{
         return names.map(name => this.getTool(name))
     }
 
@@ -51,7 +61,7 @@ export class ToolRegistry<const T extends Tool[]> {
         return dublikaes.length > 0 ? true : false
     }
 
-    public get allTools():DynamicStructuredTool[]{
+    public get allTools():RegistryTools<T>{
         return this.tools
     }
 }

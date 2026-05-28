@@ -39,7 +39,6 @@ interface DeepAgentProps<
     T extends OutputSchema | undefined = undefined,
     TTools extends readonly DynamicStructuredTool[] = readonly [],
     TBackend = undefined,
-    TInterruptOn extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>> | undefined = undefined,
 > {
     tools?: TTools
     prompt?: string | Array<string>
@@ -52,7 +51,7 @@ interface DeepAgentProps<
     permissions?: FilesystemPermission[]
     skills?: string[]
     middleware?: AgentMiddleware[]
-    interruptOn?: TInterruptOn
+    interruptOn?: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>
     store?: BaseStore
     name?: string
     contextSchema?: CreateDeepAgentParams["contextSchema"]
@@ -122,7 +121,7 @@ export class DeepAgent<
     T extends OutputSchema | undefined = undefined,
     const TTools extends readonly DynamicStructuredTool[] = readonly [],
     TBackend = undefined,
-    TInterruptOn extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>> | undefined = undefined,
+    THasInterrupt extends boolean = false,
 > {
     private prompt: Array<["system", string]>
     private tools: TTools
@@ -137,7 +136,7 @@ export class DeepAgent<
     private permissions: FilesystemPermission[] | undefined
     private skills: string[] | undefined
     private middleware: AgentMiddleware[] | undefined
-    private interruptOn: TInterruptOn
+    private interruptOn: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>> | undefined
     private store: BaseStore | undefined
     private name: string | undefined
     private contextSchema: CreateDeepAgentParams["contextSchema"]
@@ -159,7 +158,7 @@ export class DeepAgent<
         store,
         name,
         contextSchema,
-    }: DeepAgentProps<T, TTools, TBackend, TInterruptOn> = {} as DeepAgentProps<T, TTools, TBackend, TInterruptOn>) {
+    }: DeepAgentProps<T, TTools, TBackend> = {} as DeepAgentProps<T, TTools, TBackend>) {
         this.prompt = typeof prompt === "string"
             ? [["system", prompt]]
             : prompt.map((p: string) => ["system", p] as ["system", string])
@@ -173,10 +172,44 @@ export class DeepAgent<
         this.permissions = permissions
         this.skills = skills
         this.middleware = middleware
-        this.interruptOn = interruptOn as TInterruptOn
+        this.interruptOn = interruptOn
         this.store = store
         this.name = name
         this.contextSchema = contextSchema
+    }
+
+    static create<
+        const TTools extends readonly DynamicStructuredTool[],
+        TBackend = undefined,
+    >(
+        props: DeepAgentProps<undefined, TTools, TBackend> & {
+            interruptOn: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>
+        },
+    ): DeepAgent<undefined, TTools, TBackend, true>
+    static create<
+        const TTools extends readonly DynamicStructuredTool[],
+        TBackend = undefined,
+        U extends OutputSchema = OutputSchema,
+    >(
+        props: DeepAgentProps<U, TTools, TBackend> & {
+            interruptOn: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>
+        },
+    ): DeepAgent<U, TTools, TBackend, true>
+    static create<
+        const TTools extends readonly DynamicStructuredTool[],
+        TBackend = undefined,
+    >(
+        props: DeepAgentProps<undefined, TTools, TBackend>,
+    ): DeepAgent<undefined, TTools, TBackend, false>
+    static create<
+        const TTools extends readonly DynamicStructuredTool[],
+        TBackend = undefined,
+        U extends OutputSchema = OutputSchema,
+    >(
+        props: DeepAgentProps<U, TTools, TBackend>,
+    ): DeepAgent<U, TTools, TBackend, false>
+    static create(props: DeepAgentProps<any, any, any>): DeepAgent<any, any, any, any> {
+        return new DeepAgent(props)
     }
 
     private markAgentDirty() {
@@ -356,21 +389,21 @@ export class DeepAgent<
     }
 
     public async invoke(
-        this: DeepAgent<undefined, TTools, TBackend, undefined>,
+        this: DeepAgent<undefined, TTools, TBackend, true>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
+    ): Promise<string | DeepAgentInterrupt>
+    public async invoke<U extends OutputSchema>(
+        this: DeepAgent<U, TTools, TBackend, true>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
+    ): Promise<z.infer<U> | DeepAgentInterrupt>
+    public async invoke(
+        this: DeepAgent<undefined, TTools, TBackend, false>,
         invokeInput: DeepAgentRunInputBase,
     ): Promise<string>
     public async invoke<U extends OutputSchema>(
-        this: DeepAgent<U, TTools, TBackend, undefined>,
+        this: DeepAgent<U, TTools, TBackend, false>,
         invokeInput: DeepAgentRunInputBase,
     ): Promise<z.infer<U>>
-    public async invoke<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
-        this: DeepAgent<undefined, TTools, TBackend, I>,
-        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
-    ): Promise<string | DeepAgentInterrupt>
-    public async invoke<U extends OutputSchema, I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
-        this: DeepAgent<U, TTools, TBackend, I>,
-        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
-    ): Promise<z.infer<U> | DeepAgentInterrupt>
     public async invoke(
         invokeInput: DeepAgentRunInputBase & Partial<DeepAgentHitlFields>,
     ): Promise<string | z.infer<OutputSchema> | DeepAgentInterrupt> {
@@ -408,21 +441,21 @@ export class DeepAgent<
     }
 
     public stream(
-        this: DeepAgent<T, TTools, TBackend, undefined>,
+        this: DeepAgent<T, TTools, TBackend, true>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
+    ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown>
+    public stream(
+        this: DeepAgent<T, TTools, TBackend, true>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields & DeepAgentShowToolCallsField,
+    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent, void, unknown>
+    public stream(
+        this: DeepAgent<T, TTools, TBackend, false>,
         invokeInput: DeepAgentRunInputBase,
     ): AsyncGenerator<string, void, unknown>
     public stream(
-        this: DeepAgent<T, TTools, TBackend, undefined>,
+        this: DeepAgent<T, TTools, TBackend, false>,
         invokeInput: DeepAgentRunInputBase & DeepAgentShowToolCallsField,
     ): AsyncGenerator<string | DeepAgentToolEvent, void, unknown>
-    public stream<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
-        this: DeepAgent<T, TTools, TBackend, I>,
-        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
-    ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown>
-    public stream<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
-        this: DeepAgent<T, TTools, TBackend, I>,
-        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields & DeepAgentShowToolCallsField,
-    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent, void, unknown>
     public async *stream(
         invokeInput: DeepAgentRunInputBase & Partial<DeepAgentHitlFields> & { showToolCalls?: boolean },
     ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent, void, unknown> {

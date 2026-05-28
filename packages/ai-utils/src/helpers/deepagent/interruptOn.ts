@@ -42,16 +42,23 @@ export type DeepAgentExecuteTool = typeof DEEP_AGENT_EXECUTE_TOOL
 
 type ExecuteCapableBackend = LocalShellBackend | DenoSandbox | DaytonaSandbox
 
+/** Von `createLocalShellBackend()` etc. — aktiviert `execute` im interruptOn-Autocomplete. */
+export type ExecuteCapableDeepAgentBackend = { readonly __deepAgentExecute?: true }
+
 /** Runtime: `execute` nur bei Shell/Sandbox-Backend — nicht bei `createWorkspaceBackend()` / Composite+StateBackend. */
 export type BackendSupportsExecute<TBackend> =
-    TBackend extends ExecuteCapableBackend
+    TBackend extends ExecuteCapableBackend | ExecuteCapableDeepAgentBackend
         ? true
         : TBackend extends Promise<infer P>
             ? BackendSupportsExecute<P>
             : false
 
+type LiteralToolName<TName extends string> = string extends TName ? never : TName
+
 export type ToolNamesOf<TTools extends readonly { name: string }[]> = {
-    [K in keyof TTools]: TTools[K] extends { name: infer N extends string } ? N : never
+    [K in keyof TTools]: TTools[K] extends { name: infer TName extends string }
+        ? LiteralToolName<TName>
+        : never
 }[number]
 
 /** Alle Tool-Namen die der Agent haben kann — Keys für `interruptOn`. */
@@ -63,9 +70,9 @@ export type DeepAgentInterruptableToolName<
     | ToolNamesOf<TTools>
     | (BackendSupportsExecute<TBackend> extends true ? DeepAgentExecuteTool : never)
 
-export type InterruptOnFor<TToolName extends string> = Partial<
-    Record<TToolName, DeepAgentInterruptConfig>
->
+export type InterruptOnFor<TToolName extends string> = {
+    [K in TToolName]?: DeepAgentInterruptConfig
+}
 
 /** Untyped fallback — prefer `InterruptOnFor<DeepAgentInterruptableToolName<...>>` via DeepAgent generics. */
 export type InterruptOn = InterruptOnFor<string>

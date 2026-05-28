@@ -5,6 +5,7 @@ import {
     CompositeBackend,
     type LocalShellBackendOptions,
 } from "../../imports"
+import type { ExecuteCapableDeepAgentBackend } from "./interruptOn"
 
 type Prettify<T> = {
     [K in keyof T]: T[K]
@@ -116,17 +117,18 @@ export async function createLocalShellBackend({
     rootDir = process.cwd(),
     virtualMode = true,
     ...options
-}: Prettify<LocalShellBackendOptions & { route: string }>) {
+}: Prettify<LocalShellBackendOptions & { route: string }>): Promise<CompositeBackend & ExecuteCapableDeepAgentBackend> {
     const normalizedRoute = route.endsWith("/") ? route : `${route}/`
     const shellBackend = await LocalShellBackend.create({
         rootDir,
         virtualMode,
         ...options,
     })
-    return new CompositeBackend(
+    const backend = new CompositeBackend(
         new StateBackend(), 
         {
             [normalizedRoute]: shellBackend,
         }
     )
+    return Object.assign(backend, { __deepAgentExecute: true as const })
 }
