@@ -1,9 +1,14 @@
 import { input } from "@delofarag/base-utils/server"
 import { logChunk } from "./helpers"
-import type { DeepAgentStreamChunk } from "./deepagent/interruptTypes"
+import { isInterrupt } from "../client/index"
+import type { DeepAgentStreamChunk, DeepAgentUserDecision } from "./deepagent/interruptTypes"
 
 type SessionStreamable = {
-    stream(input: { input: string; thread_id: string }): AsyncIterable<DeepAgentStreamChunk>
+    stream(input: {
+        input?: string
+        thread_id: string
+        decision?: DeepAgentUserDecision
+    }): AsyncIterable<DeepAgentStreamChunk>
 }
 
 type SessionProps = {
@@ -11,6 +16,28 @@ type SessionProps = {
     breakword?: string
     numberOfMessages?: number
     id?: string
+    isDeepAgent?: boolean
+}
+
+function parseDeepAgentDecision(message: string): DeepAgentUserDecision | undefined {
+    const normalized = message.trim().toLowerCase()
+    if (!normalized) return undefined
+
+    if (normalized.startsWith("reject:")) {
+        return { type: "reject", message: message.slice("reject:".length).trim() }
+    }
+
+    const approveWords = ["approve", "approved", "aprove", "yes", "y", "ja", "ok", "okay"]
+    if (approveWords.includes(normalized) || normalized.includes("darf") || normalized.includes("klar")) {
+        return "approve"
+    }
+
+    const rejectWords = ["reject", "rejected", "no", "n", "nein"]
+    if (rejectWords.includes(normalized)) {
+        return "reject"
+    }
+
+    return undefined
 }
 
 /** 
@@ -25,9 +52,11 @@ export async function session({
     streamable,
     breakword = "exit",
     numberOfMessages = Number.POSITIVE_INFINITY,
-    id = `${Date.now()}`
+    id = `${Date.now()}`,
+    isDeepAgent = false,
 }: SessionProps): Promise<void> {
     let messages = 0
+    let pendingInterrupt = false
 
     while (true) {
         try {
@@ -36,13 +65,29 @@ export async function session({
                 break
             }
 
-            const response = streamable.stream({
-                input: message,
-                thread_id: id
-            })
+            const streamInput = pendingInterrupt && isDeepAgent
+                ? {
+                    thread_id: id,
+                    decision: parseDeepAgentDecision(message),
+                }
+                : {
+                    input: message,
+                    thread_id: id,
+                }
+
+            if (pendingInterrupt && isDeepAgent && !streamInput.decision) {
+                console.log("Pending interrupt. Bitte antworte mit approve oder reject.")
+                continue
+            }
+
+            pendingInterrupt = false
+            const response = streamable.stream(streamInput)
             console.log("Assistant: ")
             for await (const chunk of response) {
                 logChunk(chunk)
+                if (isDeepAgent && isInterrupt(chunk)) {
+                    pendingInterrupt = true
+                }
             }
             console.log("")
         } catch (e) {

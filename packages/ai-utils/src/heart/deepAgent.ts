@@ -34,11 +34,12 @@ import {
     type InterruptOnFor,
 } from "../helpers/deepagent/interruptOn"
 import { mapNativeStreamChunk } from "../helpers/deepagent/streamEvents"
+import type { DeepAgentBackend } from "../helpers/deepagent/backend"
 
 interface DeepAgentProps<
     T extends OutputSchema | undefined = undefined,
     TTools extends readonly DynamicStructuredTool[] = readonly [],
-    TBackend = undefined,
+    TBackend extends DeepAgentBackend | undefined = undefined,
 > {
     tools?: TTools
     prompt?: string | Array<string>
@@ -120,7 +121,7 @@ function blocksToSystemPrompt(blocks: Array<["system", string]>): string {
 export class DeepAgent<
     T extends OutputSchema | undefined = undefined,
     const TTools extends readonly DynamicStructuredTool[] = readonly [],
-    TBackend = undefined,
+    TBackend extends DeepAgentBackend | undefined = undefined,
     THasInterrupt extends boolean = false,
 > {
     private prompt: Array<["system", string]>
@@ -180,7 +181,7 @@ export class DeepAgent<
 
     static create<
         const TTools extends readonly DynamicStructuredTool[],
-        TBackend = undefined,
+        TBackend extends DeepAgentBackend | undefined = undefined,
     >(
         props: DeepAgentProps<undefined, TTools, TBackend> & {
             interruptOn: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>
@@ -188,7 +189,7 @@ export class DeepAgent<
     ): DeepAgent<undefined, TTools, TBackend, true>
     static create<
         const TTools extends readonly DynamicStructuredTool[],
-        TBackend = undefined,
+        TBackend extends DeepAgentBackend | undefined = undefined,
         U extends OutputSchema = OutputSchema,
     >(
         props: DeepAgentProps<U, TTools, TBackend> & {
@@ -197,18 +198,18 @@ export class DeepAgent<
     ): DeepAgent<U, TTools, TBackend, true>
     static create<
         const TTools extends readonly DynamicStructuredTool[],
-        TBackend = undefined,
+        TBackend extends DeepAgentBackend | undefined = undefined,
     >(
         props: DeepAgentProps<undefined, TTools, TBackend>,
     ): DeepAgent<undefined, TTools, TBackend, false>
     static create<
         const TTools extends readonly DynamicStructuredTool[],
-        TBackend = undefined,
+        TBackend extends DeepAgentBackend | undefined = undefined,
         U extends OutputSchema = OutputSchema,
     >(
         props: DeepAgentProps<U, TTools, TBackend>,
     ): DeepAgent<U, TTools, TBackend, false>
-    static create(props: DeepAgentProps<any, any, any>): DeepAgent<any, any, any, any> {
+    static create(props: DeepAgentProps<any, any, DeepAgentBackend | undefined>): DeepAgent<any, any, DeepAgentBackend | undefined, any> {
         return new DeepAgent(props)
     }
 
@@ -229,7 +230,7 @@ export class DeepAgent<
             checkpointer: this.checkpointer,
             ...(this.agentsMd ? { memory: this.agentsMd } : {}),
             ...(this.subagents ? { subagents: this.subagents } : {}),
-            ...(this.backend ? { backend: this.backend as any } : {}),
+            ...(this.backend ? { backend: this.backend } : {}),
             ...(this.permissions ? { permissions: this.permissions } : {}),
             ...(this.skills ? { skills: this.skills } : {}),
             ...(this.middleware ? { middleware: this.middleware as any } : {}),

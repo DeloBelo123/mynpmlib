@@ -49,9 +49,7 @@ export type ExecuteCapableDeepAgentBackend = { readonly __deepAgentExecute?: tru
 export type BackendSupportsExecute<TBackend> =
     TBackend extends ExecuteCapableBackend | ExecuteCapableDeepAgentBackend
         ? true
-        : TBackend extends Promise<infer P>
-            ? BackendSupportsExecute<P>
-            : false
+        : false
 
 type LiteralToolName<TName extends string> = string extends TName ? never : TName
 

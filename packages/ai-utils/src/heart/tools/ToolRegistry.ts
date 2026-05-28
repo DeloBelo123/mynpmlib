@@ -28,19 +28,18 @@ export class ToolRegistry<const T extends Tool[]> {
         }
     }
 
-    public getTool(name:ExtractToolNames<T>): RegistryTools<T>[number] | undefined{
+    public getTool(name: ExtractToolNames<T>): RegistryTools<T>[number] {
         const tools = this.tools.filter(tool => tool.name.toLowerCase() === name.toLowerCase())
         if (tools.length > 1) {
             throw new Error(`Error! mehrere tools wurden unter den gleichen Namen ${name} registriert!`)
         }
-        if (tools.length !== 1){
-            console.error(`unter ${name} wurde kein Tool gefunden`)
-            return
+        if (tools.length !== 1) {
+            throw new Error(`unter ${name} wurde kein Tool gefunden`)
         }
-        return tools[0]
+        return tools[0] as RegistryTools<T>[number]
     }
 
-    public getTools(...names:ExtractToolNames<T>[]): Array<RegistryTools<T>[number] | undefined>{
+    public getTools(...names: ExtractToolNames<T>[]): RegistryTools<T>[number][] {
         return names.map(name => this.getTool(name))
     }
 

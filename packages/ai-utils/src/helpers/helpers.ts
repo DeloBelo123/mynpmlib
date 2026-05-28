@@ -19,9 +19,11 @@ export function logChunk(chunk: DeepAgentStreamChunk | DeepAgentStreamChunkWithT
       console.log("\n[interrupt] Multiple tools require approval:")
       for (const item of chunk.items) {
         console.log(`  - ${item.toolName}: ${item.question}`)
+        console.log(`    decisions: ${item.decisions.join(", ")}`)
       }
     } else {
       console.log(`\n[interrupt] ${chunk.question}`)
+      console.log(`decisions: ${chunk.decisions.join(", ")}`)
     }
     return
   }
