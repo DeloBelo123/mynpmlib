@@ -112,11 +112,11 @@ export function createWorkspaceBackend({
 }
  */
 export async function createLocalShellBackend({
+    route,
     rootDir = process.cwd(),
-    route = "/workspace/",
     virtualMode = true,
     ...options
-}: Prettify<LocalShellBackendOptions & { route?: string }> = {}) {
+}: Prettify<LocalShellBackendOptions & { route: string }>) {
     const normalizedRoute = route.endsWith("/") ? route : `${route}/`
     const shellBackend = await LocalShellBackend.create({
         rootDir,

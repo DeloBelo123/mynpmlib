@@ -91,12 +91,13 @@ export type InterruptOn = NonNullable<CreateDeepAgentParams["interruptOn"]>
  * ```ts
  * // 1) Ein Tool oder mehrere mit gleicher Regel → direkt zuweisen
  * interruptOn: requireApproval("read_file", "write_file")
- * interruptOn: approveOrReject("getCandidates", "Bewerberdaten abrufen?")
- * interruptOn: filesystemWritesRequireApproval()
+ * interruptOn: approveOrReject([
+ *     { tool: "getCandidates", question: "Bewerberdaten abrufen?" },
+ * ])
  *
  * // 2) Verschiedene Regeln pro Tool → mergeInterruptOn (kein Spread nötig)
  * interruptOn: mergeInterruptOn(
- *     approveOrReject("getCandidates", "..."),
+ *     approveOrReject([{ tool: "getCandidates", question: "..." }]),
  *     requireApproval("execute"),
  * )
  * ```
@@ -105,86 +106,41 @@ export type InterruptOn = NonNullable<CreateDeepAgentParams["interruptOn"]>
  * Tools die nicht in der Map stehen, laufen ohne Pause (auto-approve).
  */
 
+export type ApproveOrRejectEntry = {
+    tool: string
+    question: string
+}
+
 /**
- * Pause vor Tool-Ausführung. User darf approve, edit und reject.
- * Default-Text: "Tool execution requires approval" + Tool-Name + Args.
+ * Pause mit eigenem Text pro Tool. User darf nur approve oder reject (kein edit).
  *
  * @example
  * new DeepAgent({
  *     checkpointer: new MemorySaver(),
- *     interruptOn: requireApproval("getCandidates", "read_file"),
+ *     interruptOn: approveOrReject([
+ *         {
+ *             tool: "getCandidates",
+ *             question: "Der Agent möchte Bewerberdaten abrufen. Erlauben?",
+ *         },
+ *         {
+ *             tool: "write_file",
+ *             question: "Der Agent möchte eine Datei schreiben. Erlauben?",
+ *         },
+ *     ]),
  * })
  */
-export function requireApproval<const T extends string>(
-    ...toolNames: T[]
-): InterruptOnFor<T> {
-    return Object.fromEntries(toolNames.map((name) => [name, true])) as InterruptOnFor<T>
-}
-
-/**
- * Tool explizit ohne Pause — läuft sofort durch.
- * Meist innerhalb von `mergeInterruptOn()` — selten alleine als ganzes `interruptOn`.
- *
- * @example
- * interruptOn: mergeInterruptOn(
- *     requireApproval("getCandidates"),
- *     autoApprove("ping"),
- * )
- */
-export function autoApprove<const T extends string>(
-    ...toolNames: T[]
-): InterruptOnFor<T> {
-    return Object.fromEntries(toolNames.map((name) => [name, false])) as InterruptOnFor<T>
-}
-
-/**
- * Pause mit eigenem Text. User darf nur approve oder reject (kein edit).
- *
- * @example
- * new DeepAgent({
- *     checkpointer: new MemorySaver(),
- *     interruptOn: approveOrReject(
- *         "getCandidates",
- *         "Der Agent möchte Bewerberdaten abrufen. Erlauben?",
- *     ),
- * })
- */
-export function approveOrReject<const T extends string>(
-    toolName: T,
-    description?: string,
-): InterruptOnFor<T> {
-    return {
-        [toolName]: {
-            allowedDecisions: ["approve", "reject"],
-            ...(description ? { description } : {}),
-        },
-    } as InterruptOnFor<T>
-}
-
-/**
- * Pause mit Prefix-Text + Tool-Args als JSON (dynamisch pro Call).
- *
- * @example
- * new DeepAgent({
- *     checkpointer: new MemorySaver(),
- *     interruptOn: withToolArgsDescription(
- *         "getCandidates",
- *         "Der Agent möchte Bewerber abrufen:",
- *     ),
- * })
- */
-export function withToolArgsDescription<const T extends string>(
-    toolName: T,
-    prefix: string,
-    allowedDecisions: InterruptDecision[] = ["approve", "reject"],
-): InterruptOnFor<T> {
-    return {
-        [toolName]: {
-            allowedDecisions,
-            description: (toolCall: ToolCallLike) =>
-                `${prefix}\n\nArgs: ${JSON.stringify(toolCall.args, null, 2)}`,
-        },
-    } as InterruptOnFor<T>
+export function requireApproval<const T extends ReadonlyArray<{tool: string, question: string }>>(
+    entries: T,
+): InterruptOnFor<T[number]["tool"]> {
+    return Object.fromEntries(
+        entries.map(({ tool, question }) => [
+            tool,
+            {
+                allowedDecisions: ["approve", "reject"],
+                description: question,
+            },
+        ]),
+    ) as InterruptOnFor<T[number]["tool"]>
 }
 
 /**
@@ -199,7 +155,7 @@ export function withToolArgsDescription<const T extends string>(
  *     checkpointer: new MemorySaver(),
  *     interruptOn: mergeInterruptOn(
  *         requireApproval("execute"),
- *         approveOrReject("getCandidates", "Bewerberdaten abrufen?"),
+ *         approveOrReject([{ tool: "getCandidates", question: "Bewerberdaten abrufen?" }]),
  *     ),
  * })
  */
@@ -209,29 +165,6 @@ export function mergeInterruptOn<const T extends string>(
     return Object.assign({}, ...configs) as Partial<Record<T, InterruptOnEntry>>
 }
 
-/**
- * Preset: `write_file` und `edit_file` brauchen User-Freigabe.
- *
- * @example
- * new DeepAgent({
- *     checkpointer: new MemorySaver(),
- *     interruptOn: filesystemWritesRequireApproval(),
- * })
- */
-export function filesystemWritesRequireApproval(
-    description = "Datei-Schreiboperation — bitte bestätigen.",
-): InterruptOnFor<"write_file" | "edit_file"> {
-    return {
-        write_file: {
-            allowedDecisions: ["approve", "edit", "reject"],
-            description,
-        },
-        edit_file: {
-            allowedDecisions: ["approve", "edit", "reject"],
-            description,
-        },
-    }
-}
 
 export type InferInterruptOn<
     TTools extends readonly DynamicStructuredTool[] = readonly DynamicStructuredTool[],

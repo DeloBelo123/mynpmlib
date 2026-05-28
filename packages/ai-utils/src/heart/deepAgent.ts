@@ -20,17 +20,19 @@ import type {
     DeepAgentInterrupt,
     DeepAgentRunInputBase,
     DeepAgentHitlFields,
+    DeepAgentShowToolCallsField,
+    DeepAgentToolEvent,
     DeepAgentUserDecision,
 } from "../helpers/deepagent/interruptTypes"
 import {
     createResumeCommand,
     expandResumeDecisions,
-    extractInterruptFromStreamUpdate,
     getPendingInterruptCount,
     mapResultToInterrupt,
     type DeepAgentInterruptableToolName,
     type InterruptOnFor,
 } from "../helpers/deepagent/interruptOn"
+import { mapNativeStreamChunk } from "../helpers/deepagent/streamEvents"
 
 interface DeepAgentProps<
     T extends OutputSchema | undefined = undefined,
@@ -76,29 +78,6 @@ async function resolveSystemPromptBlocks(
 
 function blocksToSystemPrompt(blocks: Array<["system", string]>): string {
     return blocks.map(([, text]) => text).join("\n\n")
-}
-
-function extractTextFromMessageChunk(chunk: unknown): string | undefined {
-    const messageChunk = Array.isArray(chunk) ? chunk[0] : chunk
-    const metadata = Array.isArray(chunk) ? chunk[1] : undefined
-    const node = metadata?.langgraph_node
-    const messageType = typeof messageChunk?._getType === "function"
-        ? messageChunk._getType()
-        : messageChunk?._getType
-
-    if (node === "tools" || messageType === "tool") {
-        return undefined
-    }
-
-    const raw = messageChunk?.content
-    if (typeof raw === "string") {
-        return raw.length > 0 ? raw : undefined
-    }
-    if (Array.isArray(raw)) {
-        const text = raw.map((part: any) => part?.text ?? "").join("")
-        return text.length > 0 ? text : undefined
-    }
-    return undefined
 }
 
 /**
@@ -307,9 +286,11 @@ export class DeepAgent<
         context?: Record<string, unknown>
         decision?: DeepAgentUserDecision
         decisions?: DeepAgentUserDecision[]
-    }): AsyncGenerator<string | DeepAgentInterrupt, void, unknown> {
-        const { thread_id, context, decision, decisions } = input
+        showToolCalls?: boolean
+    }): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent, void, unknown> {
+        const { thread_id, context, decision, decisions, showToolCalls = false } = input
         this.should_use_output = false
+        const seenToolStarts = new Set<string>()
 
         try {
             const systemPrompt = blocksToSystemPrompt(this.prompt)
@@ -326,28 +307,50 @@ export class DeepAgent<
             )
 
             for await (const chunk of nativeStream) {
-                if (Array.isArray(chunk) && chunk.length === 2) {
-                    const [mode, data] = chunk
-                    if (mode === "updates") {
-                        const interrupt = extractInterruptFromStreamUpdate(data)
-                        if (interrupt) {
-                            yield interrupt
-                            return
-                        }
-                        continue
+                for (const mapped of mapNativeStreamChunk(chunk, {
+                    interruptOn: true,
+                    showToolCalls,
+                    seenToolStarts,
+                })) {
+                    if (typeof mapped === "object" && mapped !== null && mapped.kind === "interrupt") {
+                        yield mapped
+                        return
                     }
-                    if (mode === "messages") {
-                        const text = extractTextFromMessageChunk(data)
-                        if (text) yield text
-                        continue
-                    }
+                    yield mapped
                 }
-
-                const text = extractTextFromMessageChunk(chunk)
-                if (text) yield text
             }
         } finally {
             this.should_use_output = true
+        }
+    }
+
+    private async *runNativeStream(
+        agent: any,
+        input: { messages: HumanMessage[] },
+        config: Record<string, unknown> | undefined,
+        showToolCalls: boolean,
+    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent, void, unknown> {
+        const streamMode = this.interruptOn || showToolCalls
+            ? (["messages", "updates"] as const)
+            : "messages"
+        const nativeStream = await agent.stream(
+            input as any,
+            { ...(config ?? {}), streamMode } as any,
+        )
+        const seenToolStarts = new Set<string>()
+
+        for await (const chunk of nativeStream) {
+            for (const mapped of mapNativeStreamChunk(chunk, {
+                interruptOn: Boolean(this.interruptOn),
+                showToolCalls,
+                seenToolStarts,
+            })) {
+                if (typeof mapped === "object" && mapped !== null && mapped.kind === "interrupt") {
+                    yield mapped
+                    return
+                }
+                yield mapped
+            }
         }
     }
 
@@ -407,14 +410,22 @@ export class DeepAgent<
         this: DeepAgent<T, TTools, TBackend, undefined>,
         invokeInput: DeepAgentRunInputBase,
     ): AsyncGenerator<string, void, unknown>
+    public stream(
+        this: DeepAgent<T, TTools, TBackend, undefined>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentShowToolCallsField,
+    ): AsyncGenerator<string | DeepAgentToolEvent, void, unknown>
     public stream<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
         this: DeepAgent<T, TTools, TBackend, I>,
         invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
     ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown>
+    public stream<I extends InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>>>(
+        this: DeepAgent<T, TTools, TBackend, I>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields & DeepAgentShowToolCallsField,
+    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent, void, unknown>
     public async *stream(
-        invokeInput: DeepAgentRunInputBase & Partial<DeepAgentHitlFields>,
-    ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown> {
-        const { thread_id, decision, decisions, context, promptVars, ...variables } = invokeInput
+        invokeInput: DeepAgentRunInputBase & Partial<DeepAgentHitlFields> & { showToolCalls?: boolean },
+    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent, void, unknown> {
+        const { thread_id, decision, decisions, context, promptVars, showToolCalls, ...variables } = invokeInput
         const isResume = decision !== undefined || decisions !== undefined
 
         if (isResume) {
@@ -424,6 +435,7 @@ export class DeepAgent<
                 context,
                 decision,
                 decisions,
+                showToolCalls: showToolCalls === true,
             })
             return
         }
@@ -444,33 +456,12 @@ export class DeepAgent<
             const agent = await this.ensureAgent(systemPrompt)
             const config = this.buildConfig(thread_id, context)
 
-            const streamMode = this.interruptOn ? (["messages", "updates"] as const) : "messages"
-            const nativeStream = await agent.stream(
-                { messages: humanMessages } as any,
-                { ...(config ?? {}), streamMode } as any,
+            yield* this.runNativeStream(
+                agent,
+                { messages: humanMessages },
+                config as Record<string, unknown> | undefined,
+                showToolCalls === true,
             )
-
-            for await (const chunk of nativeStream) {
-                if (this.interruptOn && Array.isArray(chunk) && chunk.length === 2) {
-                    const [mode, data] = chunk
-                    if (mode === "updates") {
-                        const interrupt = extractInterruptFromStreamUpdate(data)
-                        if (interrupt) {
-                            yield interrupt
-                            return
-                        }
-                        continue
-                    }
-                    if (mode === "messages") {
-                        const text = extractTextFromMessageChunk(data)
-                        if (text) yield text
-                        continue
-                    }
-                }
-
-                const text = extractTextFromMessageChunk(chunk)
-                if (text) yield text
-            }
         } finally {
             this.should_use_output = true
         }

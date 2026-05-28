@@ -22,7 +22,13 @@ export type DeepAgentInterruptBatch = {
 
 export type DeepAgentInterrupt = DeepAgentInterruptSingle | DeepAgentInterruptBatch
 
+export type DeepAgentToolEvent =
+    | { kind: "tool"; phase: "start"; toolName: string; args?: Record<string, unknown> }
+    | { kind: "tool"; phase: "end"; toolName: string; output?: string }
+
 export type DeepAgentStreamChunk = string | DeepAgentInterrupt
+
+export type DeepAgentStreamChunkWithTools = DeepAgentStreamChunk | DeepAgentToolEvent
 
 export type DeepAgentUserDecision =
     | "approve"
@@ -40,4 +46,9 @@ export type DeepAgentRunInputBase = InvokeInputBase & {
 export type DeepAgentHitlFields = {
     decision?: DeepAgentUserDecision
     decisions?: DeepAgentUserDecision[]
+}
+
+/** stream()-only — Return-Typ enthält dann DeepAgentToolEvent. */
+export type DeepAgentShowToolCallsField = {
+    showToolCalls: true
 }

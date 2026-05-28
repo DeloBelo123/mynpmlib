@@ -17,9 +17,12 @@ export type {
     DeepAgentInterruptSingle,
     DeepAgentInterruptBatch,
     DeepAgentStreamChunk,
+    DeepAgentStreamChunkWithTools,
+    DeepAgentToolEvent,
     DeepAgentUserDecision,
     DeepAgentRunInputBase,
     DeepAgentHitlFields,
+    DeepAgentShowToolCallsField,
 } from "./helpers/deepagent/interruptTypes"
 export * from "./heart/tools/ToolRegistry"
 export { tavilySearchTool, TavilySearch } from "./heart/tools/Tavily"
