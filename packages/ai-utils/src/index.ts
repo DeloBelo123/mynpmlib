@@ -23,6 +23,9 @@ export type {
     DeepAgentRunInputBase,
     DeepAgentHitlFields,
     DeepAgentShowToolCallsField,
+    DeepAgentInterruptConfig,
+    DeepAgentInterruptToolCall,
+    DeepAgentInterruptQuestion,
 } from "./helpers/deepagent/interruptTypes"
 export * from "./heart/tools/ToolRegistry"
 export { tavilySearchTool, TavilySearch } from "./heart/tools/Tavily"

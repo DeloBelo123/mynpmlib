@@ -329,14 +329,18 @@ Pausiert den Agent **vor** Tool-Ausführung. Braucht `checkpointer` + `thread_id
 import {
     DeepAgent,
     MemorySaver,
-    requireApproval,
     StreamResponse,
 } from "@delofarag/ai-utils"
 import { isInterrupt } from "@delofarag/ai-utils/client"
 
 const hrAgent = new DeepAgent({
     checkpointer: new MemorySaver(),
-    interruptOn: requireApproval("write_file"),
+    interruptOn: {
+        write_file: {
+            decisions: ["approve", "edit", "reject"],
+            question: "Der Agent möchte eine Datei schreiben. Erlauben?",
+        },
+    },
 })
 
 // invoke

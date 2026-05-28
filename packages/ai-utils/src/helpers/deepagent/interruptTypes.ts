@@ -52,3 +52,19 @@ export type DeepAgentHitlFields = {
 export type DeepAgentShowToolCallsField = {
     showToolCalls: true
 }
+
+/** Tool-Call der an `question`-Functions übergeben wird (vor der Pause). */
+export type DeepAgentInterruptToolCall = {
+    name: string
+    args: Record<string, unknown>
+}
+
+export type DeepAgentInterruptQuestion =
+    | string
+    | ((toolCall: DeepAgentInterruptToolCall) => string | Promise<string>)
+
+/** User-Config pro Tool für `interruptOn` auf DeepAgent. */
+export type DeepAgentInterruptConfig = {
+    decisions: DeepAgentAllowedDecision[]
+    question: DeepAgentInterruptQuestion
+}
