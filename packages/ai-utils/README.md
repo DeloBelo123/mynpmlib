@@ -619,25 +619,6 @@ const agent = new DeepAgent({
 
 ---
 
-### Subagents
-
-```ts
-import { DeepAgent, createSubAgent } from "@delofarag/ai-utils"
-
-const agent = new DeepAgent({
-    subagents: [
-        createSubAgent({
-            name: "researcher",
-            description: "Recherchiert komplexe Themen",
-            prompt: "Du bist ein Research-Spezialist.",
-            tools: [...],
-        }),
-    ],
-})
-```
-
----
-
 ### Skills
 
 Skill-Dateien vom Backend laden (deepagents native Feature):
@@ -1051,7 +1032,7 @@ Top-level Exports (`@delofarag/ai-utils`):
 
 - Helpers (`helpers`, `memory`, `rag`, `llms`, `chatbot`, `logChunk`)
 - Core (`Agent`, `Chain`, `DeepAgent`)
-- DeepAgent (`createWorkspaceBackend`, `createLocalShellBackend`, `createDenoSandbox`, `workspacePermissions`, `createSubAgent`, `interruptOn`-Helper, alle `DeepAgent*`-Types)
+- DeepAgent (`createWorkspaceBackend`, `createLocalShellBackend`, `createDenoSandbox`, `workspacePermissions`, `interruptOn`-Helper, alle `DeepAgent*`-Types)
 - Memory (`MemorySaver`, `SmartCheckpointSaver`, `SupabaseCheckpointSaver`, `chatSummarizer`)
 - Tools (`ToolRegistry`, `CombinedToolRegistry`, `ZodiosToolRegistry`, `Tavily`, `RAGTool`)
 - Magic-Funcs (answerers/evaluators/parsers/optimizers)

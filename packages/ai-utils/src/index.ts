@@ -8,7 +8,6 @@ export * from "./heart/chain"
 export * from "./heart/deepAgent"
 export * from "./helpers/deepagent/backend"
 export * from "./helpers/deepagent/sandbox"
-export * from "./helpers/deepagent/subagent"
 export * from "./helpers/deepagent/permissions"
 export * from "./helpers/deepagent/interruptOn"
 export type {
