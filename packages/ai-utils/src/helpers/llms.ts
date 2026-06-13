@@ -4,6 +4,10 @@ export type Prettify<T> = {
   [K in keyof T]: T[K]
 } & {};
 
+type ExtraGroq = ChatGroq & { provider?: "chatgroq" }
+type ExtraOllama = ChatOllama & { provider?: "local" }
+type ExtraOpenAI = ChatOpenAI & { provider?: "openrouter" }
+
 export type AutoComplete<T extends string> = T | (string & {})
 
 /** Groq Cloud Chat-Completions (https://console.groq.com/docs/models): Production, Compound, Preview. */
@@ -276,8 +280,8 @@ export function getLLM(config: LLMConfig) {
   const type = config.type
 
   switch (config.provider) {
-    case "chatgroq":
-      return new ChatGroq({
+    case "chatgroq": {
+      const llm: ExtraGroq = new ChatGroq({
         apiKey: config.apikey ?? process.env.CHATGROQ_API_KEY,
         model: config.model ?? (
           type === "vision"
@@ -289,9 +293,11 @@ export function getLLM(config: LLMConfig) {
                 : "llama-3.3-70b-versatile"
         )
       });
-
-    case "openrouter":
-      return new ChatOpenAI({
+      llm.provider = "chatgroq"
+      return llm
+    }
+    case "openrouter": {
+      const llm: ExtraOpenAI = new ChatOpenAI({
         apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
         configuration: {
           baseURL: config.dataSafe
@@ -319,14 +325,20 @@ export function getLLM(config: LLMConfig) {
             }
           : {}),
       })
+      llm.provider = "openrouter"
+      return llm
+    }
+      
 
-    case "local":
-      return new ChatOllama({
+    case "local": {
+      const llm: ExtraOllama = new ChatOllama({
         model: config.model ?? "llama3.2:3b"
       });
+      llm.provider = "local"
+      return llm
+    }
 
     default:
       throw new Error("Unknown LLM provider");
   }
 }
-

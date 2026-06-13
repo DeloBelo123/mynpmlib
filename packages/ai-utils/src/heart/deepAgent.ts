@@ -82,6 +82,7 @@ function blocksToSystemPrompt(blocks: Array<["system", string]>): string {
 }
 
 /**
+ * @example
  constructor({
         prompt = `Du bist ein hilfreicher Deep Agent.`,
         llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
