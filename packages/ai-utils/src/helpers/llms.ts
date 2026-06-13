@@ -1,11 +1,11 @@
-import { ChatGroq, ChatOllama, ChatOpenAI } from "../imports";
+import { ChatGroq, ChatOpenAI } from "../imports";
 
 export type Prettify<T> = {
   [K in keyof T]: T[K]
 } & {};
 
 type ExtraGroq = ChatGroq & { provider?: "chatgroq" }
-type ExtraOllama = ChatOllama & { provider?: "local" }
+type ExtraLocal = ChatOpenAI & { provider?: "local" }
 type ExtraOpenAI = ChatOpenAI & { provider?: "openrouter" }
 
 export type AutoComplete<T extends string> = T | (string & {})
@@ -227,8 +227,12 @@ export type OpenRouterImageGenModel = AutoComplete<
   | "sourceful/riverflow-v2-standard-preview"
 >
 
+/** LM Studio Model-IDs (kurze Hub-Bezeichner, siehe GET /v1/models). */
 export type LocalModel = AutoComplete<
-  | "llama3.2:3b"
+  | "google/gemma-4-12b-qat"
+  | "nvidia/nemotron-3-nano-4b"
+  | "google/gemma-4-e4b"
+  | "igorls/gemma-4-12b-it-qat-unquantized-heretic"
 >
 
 export type LLMModelSpecification = "vision" | "image-gen" | "stt" | "tts"
@@ -274,7 +278,7 @@ export type LLMConfig = GroqLLMConfig | OpenRouterLLMConfig | LocalLLMConfig
    * 
    * default llm for openrouter: "openai/gpt-5.4-mini"
    * 
-   * default llm for local: "llama3.2:3b"
+   * default llm for local: "nvidia/nemotron-3-nano-4b"
    */
 export function getLLM(config: LLMConfig) {
   const type = config.type
@@ -331,8 +335,10 @@ export function getLLM(config: LLMConfig) {
       
 
     case "local": {
-      const llm: ExtraOllama = new ChatOllama({
-        model: config.model ?? "llama3.2:3b"
+      const llm: ExtraLocal = new ChatOpenAI({
+        model: config.model ?? "nvidia/nemotron-3-nano-4b",
+        apiKey: "lm-studio",
+        configuration: { baseURL: "http://localhost:1234/v1" },
       });
       llm.provider = "local"
       return llm
