@@ -14,11 +14,11 @@ import {
   type CallbackManagerForLLMRun,
 } from "../imports"
 import type { AutoComplete } from "./llms"
-import { spawn } from "node:child_process"
-import { createInterface } from "node:readline"
-import { tmpdir } from "node:os"
-import { mkdtempSync } from "node:fs"
-import { join } from "node:path"
+import { spawn } from "child_process"
+import { createInterface } from "readline"
+import { tmpdir } from "os"
+import { mkdtempSync } from "fs"
+import { join } from "path"
 
 /**
  * CLI_LLM — nutzt die headless CLIs der Provider (z.B. `claude -p`, `codex exec`)
@@ -404,7 +404,7 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
     kwargs?: Partial<CLILLMCallOptions>
   ): Runnable<BaseLanguageModelInput, AIMessageChunk, CLILLMCallOptions> {
     const specs = tools.map(toToolSpec)
-    return this.withConfig({ tools: specs, ...kwargs } as Partial<CLILLMCallOptions>) as unknown as Runnable<
+    return this.bind({ tools: specs, ...kwargs } as Partial<CLILLMCallOptions>) as unknown as Runnable<
       BaseLanguageModelInput,
       AIMessageChunk,
       CLILLMCallOptions
@@ -600,20 +600,29 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
   /** Startet die CLI, schreibt stdin, sammelt stdout. Wirft bei Exit≠0, Timeout oder Abort. */
   protected runCli(args: string[], stdin: string, signal?: AbortSignal): Promise<string> {
     return new Promise<string>((resolve, reject) => {
+      const allowedEnvKeys = ["PATH", "HOME", "USER", "SHELL", "TERM", "LANG", "LC_ALL"]
+      const minimalEnv: Record<string, string> = {}
+      for (const key of allowedEnvKeys) {
+        if (process.env[key]) minimalEnv[key] = process.env[key]!
+      }
       const child = spawn(this.cliPath, args, {
         cwd: this.cwd,
-        env: { ...process.env, ...this.env },
+        env: { ...minimalEnv, ...this.env },
         stdio: ["pipe", "pipe", "pipe"],
       })
 
       let stdout = ""
       let stderr = ""
       let timedOut = false
+      let killTimer: NodeJS.Timeout | undefined
 
       const timer = this.timeoutMs
         ? setTimeout(() => {
             timedOut = true
             child.kill("SIGTERM")
+            killTimer = setTimeout(() => {
+              child.kill("SIGKILL")
+            }, 5000)
           }, this.timeoutMs)
         : undefined
 
@@ -625,6 +634,7 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
 
       const cleanup = () => {
         if (timer) clearTimeout(timer)
+        if (killTimer) clearTimeout(killTimer)
         if (signal) signal.removeEventListener("abort", onAbort)
       }
 
@@ -648,7 +658,17 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
         if (code === 0) return resolve(stdout)
         // Exit≠0: viele CLIs liefern einen strukturierten Fehler auf stdout (z.B. claude `is_error`).
         // Den an parseFinal durchreichen, damit eine klare (ggf. Usage-Limit-)Fehlermeldung entsteht.
-        if (stdout.trim().length > 0) return resolve(stdout)
+        if (stdout.trim().length > 0) {
+          try {
+            this.parseFinal(stdout)
+            // parseFinal hat keinen Fehler geworfen → strukturierter Fehler wurde nicht erkannt → reject
+            reject(buildCliError(this.provider, stderr.trim() || `CLI Exit-Code ${code}`, { exitCode: code }))
+          } catch (err) {
+            // parseFinal hat einen strukturierten Fehler erkannt und geworfen → durchreichen
+            reject(err)
+          }
+          return
+        }
         // Sonst aus stderr klassifizieren (z.B. ein Limit-Hinweis dort).
         reject(buildCliError(this.provider, stderr.trim() || `CLI Exit-Code ${code}`, { exitCode: code }))
       })
@@ -664,15 +684,21 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
     stdin: string,
     signal?: AbortSignal
   ): AsyncGenerator<string> {
+    const allowedEnvKeys = ["PATH", "HOME", "USER", "SHELL", "TERM", "LANG", "LC_ALL"]
+    const minimalEnv: Record<string, string> = {}
+    for (const key of allowedEnvKeys) {
+      if (process.env[key]) minimalEnv[key] = process.env[key]!
+    }
     const child = spawn(this.cliPath, args, {
       cwd: this.cwd,
-      env: { ...process.env, ...this.env },
+      env: { ...minimalEnv, ...this.env },
       stdio: ["pipe", "pipe", "pipe"],
     })
 
     let stderr = ""
     let spawnError: Error | undefined
     let timedOut = false
+    let killTimer: NodeJS.Timeout | undefined
 
     child.stderr!.on("data", (d) => (stderr += d.toString()))
     child.on("error", (err) => {
@@ -693,6 +719,9 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
       ? setTimeout(() => {
           timedOut = true
           child.kill("SIGTERM")
+          killTimer = setTimeout(() => {
+            child.kill("SIGKILL")
+          }, 5000)
         }, this.timeoutMs)
       : undefined
 
@@ -700,14 +729,20 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
     child.stdin!.end()
 
     const rl = createInterface({ input: child.stdout!, crlfDelay: Infinity })
+    let outputFinished = false
     try {
       for await (const line of rl) {
         if (line.trim().length > 0) yield line
       }
+      outputFinished = true
     } finally {
       rl.close()
       if (timer) clearTimeout(timer)
+      if (killTimer) clearTimeout(killTimer)
       if (signal) signal.removeEventListener("abort", onAbort)
+      if (!outputFinished && child.exitCode === null) {
+        child.kill("SIGTERM")
+      }
     }
 
     const code = await closed
