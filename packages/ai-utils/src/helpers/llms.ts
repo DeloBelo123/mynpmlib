@@ -1,4 +1,5 @@
 import { ChatGroq, ChatOpenAI } from "../imports";
+import { ClaudeCLI_LLM, OpenAICLI_LLM, type ClaudeCLIModel, type OpenAICLIModel } from "./cli-llms";
 
 export type Prettify<T> = {
   [K in keyof T]: T[K]
@@ -267,7 +268,33 @@ type OpenRouterLLMConfig =
 type LocalLLMConfig =
   | { provider: "local"; type?: undefined; model?: LocalModel }
 
-export type LLMConfig = GroqLLMConfig | OpenRouterLLMConfig | LocalLLMConfig
+/**
+ * Headless-CLI-Provider: nutzen die eingeloggte CLI (`claude -p` / `codex exec`)
+ * als reines LangChain-Chat-Model (Abo-Auth, kein API-Key). Siehe `cli-llms.ts`.
+ */
+type CLILLMConfigBase = {
+  type?: undefined
+  /** System-Prompt; Default `""` (ersetzt den Coder-Default der CLI). */
+  systemPrompt?: string
+  /** Arbeitsverzeichnis des Subprozesses; Default: neutrales Temp-Verzeichnis. */
+  cwd?: string
+  /** Pfad/Name des CLI-Binaries (Default je Provider). */
+  cliPath?: string
+  /** Zusätzliche CLI-Flags (Escape-Hatch). */
+  extraArgs?: string[]
+  /** Timeout in ms. */
+  timeoutMs?: number
+}
+
+type ClaudeCLILLMConfig = CLILLMConfigBase & { provider: "claude-cli"; model?: ClaudeCLIModel }
+type OpenAICLILLMConfig = CLILLMConfigBase & { provider: "openai-cli"; model?: OpenAICLIModel }
+
+export type LLMConfig =
+  | GroqLLMConfig
+  | OpenRouterLLMConfig
+  | LocalLLMConfig
+  | ClaudeCLILLMConfig
+  | OpenAICLILLMConfig
 
   /**
    * env-var for openrouter: process.env.OPENROUTER_API_KEY
@@ -279,6 +306,10 @@ export type LLMConfig = GroqLLMConfig | OpenRouterLLMConfig | LocalLLMConfig
    * default llm for openrouter: "openai/gpt-5.4-mini"
    * 
    * default llm for local: "nvidia/nemotron-3-nano-4b"
+   *
+   * provider "claude-cli": nutzt die eingeloggte `claude -p` CLI als reines LLM (Default-Model "claude-opus-4-8")
+   *
+   * provider "openai-cli": nutzt `codex exec` als reines LLM (Default-Model "gpt-5.5"; CLI muss installiert sein)
    */
 export function getLLM(config: LLMConfig) {
   const type = config.type
@@ -342,6 +373,30 @@ export function getLLM(config: LLMConfig) {
       });
       llm.provider = "local"
       return llm
+    }
+
+    case "claude-cli": {
+      // nutzt die eingeloggte `claude`-CLI (Abo-Auth, kein API-Key). `.provider` setzt die Klasse selbst.
+      return new ClaudeCLI_LLM({
+        model: config.model,
+        systemPrompt: config.systemPrompt,
+        cwd: config.cwd,
+        cliPath: config.cliPath,
+        extraArgs: config.extraArgs,
+        timeoutMs: config.timeoutMs,
+      })
+    }
+
+    case "openai-cli": {
+      // nutzt die `codex exec`-CLI (muss installiert + eingeloggt sein: `npm i -g @openai/codex`).
+      return new OpenAICLI_LLM({
+        model: config.model,
+        systemPrompt: config.systemPrompt,
+        cwd: config.cwd,
+        cliPath: config.cliPath,
+        extraArgs: config.extraArgs,
+        timeoutMs: config.timeoutMs,
+      })
     }
 
     default:
