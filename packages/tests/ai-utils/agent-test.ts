@@ -38,7 +38,7 @@ async function main(){
             nutze dafür je nach dem welche art von frage eines deiner rag-tools. wenn du das tool genutzt hast und 
             die antwort nicht kennst, sei ehrlich und sag dem kandidaten das.
         `,
-        memory: new Smart(new RAM()),
+        checkpointer: new Smart(new RAM()),
         llm: getLLM({
             provider: "openrouter",
             model:"openai/gpt-5.4-mini"

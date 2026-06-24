@@ -1,7 +1,11 @@
-import { BaseMessage, HumanMessage, AIMessage, SystemMessage} from '@langchain/core/messages'
+import { BaseMessage, HumanMessage, AIMessage, AIMessageChunk, SystemMessage} from '@langchain/core/messages'
 import { ChatPromptTemplate,MessagesPlaceholder } from '@langchain/core/prompts'
 import { BaseOutputParser,StructuredOutputParser,StringOutputParser } from '@langchain/core/output_parsers'
-import { BaseChatModel } from '@langchain/core/language_models/chat_models'
+import { BaseChatModel, type BaseChatModelParams, type BaseChatModelCallOptions, type BindToolsInput } from '@langchain/core/language_models/chat_models'
+import type { BaseLanguageModelInput } from '@langchain/core/language_models/base'
+import { ChatGenerationChunk, type ChatResult } from '@langchain/core/outputs'
+import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager'
+import { convertToOpenAITool } from '@langchain/core/utils/function_calling'
 import { Document } from '@langchain/core/documents'
 import { BaseRetriever } from '@langchain/core/retrievers'
 import { Runnable, type RunnableConfig } from '@langchain/core/runnables'
@@ -75,6 +79,7 @@ export {
     BaseMessage,
     HumanMessage,
     AIMessage,
+    AIMessageChunk,
     SystemMessage,
     ChatPromptTemplate,
     MessagesPlaceholder,
@@ -82,6 +87,14 @@ export {
     StructuredOutputParser,
     StringOutputParser,
     BaseChatModel,
+    type BaseChatModelParams,
+    type BaseChatModelCallOptions,
+    type BindToolsInput,
+    type BaseLanguageModelInput,
+    convertToOpenAITool,
+    ChatGenerationChunk,
+    type ChatResult,
+    type CallbackManagerForLLMRun,
     Document,
     BaseRetriever,
     Runnable,
