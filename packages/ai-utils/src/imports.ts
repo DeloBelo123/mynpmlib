@@ -41,6 +41,8 @@ import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres'
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite'
 import { type Checkpoint, type CheckpointMetadata, type LangGraphRunnableConfig } from "@langchain/langgraph"
 import type { CheckpointTuple, CheckpointListOptions, PendingWrite, ChannelVersions } from "@langchain/langgraph-checkpoint"
+import { MultiServerMCPClient } from "@langchain/mcp-adapters";
+import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 
 // DeepAgents package
 import { createDeepAgent } from "deepagents"
@@ -144,6 +146,8 @@ export {
     MemorySaver,
     BaseCheckpointSaver,
     Command,
+    MultiServerMCPClient,
+    OAuthClientProvider
 }
 
 // Checkpoint Savers (optional - Packages müssen installiert sein)
