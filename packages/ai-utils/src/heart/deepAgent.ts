@@ -16,6 +16,7 @@ import {
 } from "../imports"
 import { getLLM } from "../helpers/llms"
 import { structure } from "../magic-funcs/parsers/structure"
+import { buildMcpClient, buildMcpPromptBlock, type MCPServersInput } from "./tools/MCP"
 import type {
     DeepAgentInterrupt,
     DeepAgentRunInputBase,
@@ -56,6 +57,14 @@ interface DeepAgentProps<
     store?: BaseStore
     name?: string
     contextSchema?: CreateDeepAgentParams["contextSchema"]
+    /**
+     * MCP-Server, deren Tools dem Deep Agent zur Verfügung gestellt werden.
+     * Pro invoke()/stream() wird ein frischer MultiServerMCPClient gebaut,
+     * die Tools per getTools() geladen und der Client am Ende geschlossen.
+     * Achtung: bei gesetztem mcpServer wird der Agent-Cache umgangen
+     * (Neuaufbau pro Aufruf), damit close() den Client nicht für Folge-Calls killt.
+     */
+    mcpServer?: MCPServersInput
 }
 
 async function resolveSystemPromptBlocks(
@@ -142,6 +151,7 @@ export class DeepAgent<
     private store: BaseStore | undefined
     private name: string | undefined
     private contextSchema: CreateDeepAgentParams["contextSchema"]
+    private mcpServer: MCPServersInput | undefined
     private should_use_output: boolean = true
 
     constructor({
@@ -160,6 +170,7 @@ export class DeepAgent<
         store,
         name,
         contextSchema,
+        mcpServer,
     }: DeepAgentProps<T, TTools, TBackend> = {} as DeepAgentProps<T, TTools, TBackend>) {
         this.prompt = typeof prompt === "string"
             ? [["system", prompt]]
@@ -178,6 +189,7 @@ export class DeepAgent<
         this.store = store
         this.name = name
         this.contextSchema = contextSchema
+        this.mcpServer = mcpServer
     }
 
     static create<
@@ -218,15 +230,28 @@ export class DeepAgent<
         this.agentCacheDirty = true
     }
 
-    private async ensureAgent(systemPrompt: string) {
-        if (!this.agentCacheDirty && this.agent) {
+    private get hasMcp(): boolean {
+        if (!this.mcpServer) return false
+        return Array.isArray(this.mcpServer) ? this.mcpServer.length > 0 : true
+    }
+
+    private systemPromptWithMcp(blocks: Array<["system", string]>): string {
+        const mcpBlock = buildMcpPromptBlock(this.mcpServer)
+        const finalBlocks = mcpBlock ? [...blocks, ["system", mcpBlock] as ["system", string]] : blocks
+        return blocksToSystemPrompt(finalBlocks)
+    }
+
+    private async ensureAgent(systemPrompt: string, mcpTools: DynamicStructuredTool[] = []) {
+        if (!this.hasMcp && !this.agentCacheDirty && this.agent) {
             return this.agent
         }
 
-        this.agent = createDeepAgent({
+        const tools = [...(this.tools as unknown as DynamicStructuredTool[]), ...mcpTools]
+
+        const agent = createDeepAgent({
             model: this.llm as any,
             systemPrompt,
-            tools: this.tools as any,
+            tools: tools as any,
             ...(this.output ? { responseFormat: this.output as any } : {}),
             checkpointer: this.checkpointer,
             ...(this.agentsMd ? { memory: this.agentsMd } : {}),
@@ -240,8 +265,15 @@ export class DeepAgent<
             ...(this.name ? { name: this.name } : {}),
             ...(this.contextSchema ? { contextSchema: this.contextSchema as any } : {}),
         })
-        this.agentCacheDirty = false
-        return this.agent
+
+        // Bei MCP NICHT cachen: der Client wird pro Aufruf geschlossen, also müssen
+        // Tools (und damit der Agent) bei jedem Aufruf frisch aufgebaut werden.
+        if (!this.hasMcp) {
+            this.agent = agent
+            this.agentCacheDirty = false
+        }
+
+        return agent
     }
 
     private buildConfig(thread_id?: string, context?: Record<string, any>) {
@@ -302,11 +334,12 @@ export class DeepAgent<
         context?: Record<string, unknown>
         decision?: DeepAgentUserDecision
         decisions?: DeepAgentUserDecision[]
+        mcpTools?: DynamicStructuredTool[]
     }): Promise<string | z.infer<T> | DeepAgentInterrupt> {
-        const { thread_id, context, decision, decisions } = input
+        const { thread_id, context, decision, decisions, mcpTools = [] } = input
 
-        const systemPrompt = blocksToSystemPrompt(this.prompt)
-        const agent = await this.ensureAgent(systemPrompt)
+        const systemPrompt = this.systemPromptWithMcp(this.prompt)
+        const agent = await this.ensureAgent(systemPrompt, mcpTools)
         const config = this.buildConfig(thread_id, context)
 
         const pendingCount = await getPendingInterruptCount(agent, config as Record<string, unknown> | undefined)
@@ -323,14 +356,15 @@ export class DeepAgent<
         decision?: DeepAgentUserDecision
         decisions?: DeepAgentUserDecision[]
         showToolCalls?: boolean
+        mcpTools?: DynamicStructuredTool[]
     }): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent, void, unknown> {
-        const { thread_id, context, decision, decisions, showToolCalls = false } = input
+        const { thread_id, context, decision, decisions, showToolCalls = false, mcpTools = [] } = input
         this.should_use_output = false
         const seenToolStarts = new Set<string>()
 
         try {
-            const systemPrompt = blocksToSystemPrompt(this.prompt)
-            const agent = await this.ensureAgent(systemPrompt)
+            const systemPrompt = this.systemPromptWithMcp(this.prompt)
+            const agent = await this.ensureAgent(systemPrompt, mcpTools)
             const config = this.buildConfig(thread_id, context)
 
             const pendingCount = await getPendingInterruptCount(agent, config as Record<string, unknown> | undefined)
@@ -412,34 +446,42 @@ export class DeepAgent<
         const { thread_id, decision, decisions, context, debug, promptVars, ...variables } = invokeInput
         const isResume = decision !== undefined || decisions !== undefined
 
-        if (isResume) {
-            this.validateHitlResume(thread_id, variables)
-            return this.runResumeInvoke({
-                thread_id: thread_id!,
-                context,
-                decision,
-                decisions,
-            }) as Promise<string | z.infer<OutputSchema> | DeepAgentInterrupt>
+        const mcpClient = buildMcpClient(this.mcpServer)
+        try {
+            const mcpTools = mcpClient ? await mcpClient.getTools() : []
+
+            if (isResume) {
+                this.validateHitlResume(thread_id, variables)
+                return await this.runResumeInvoke({
+                    thread_id: thread_id!,
+                    context,
+                    decision,
+                    decisions,
+                    mcpTools,
+                }) as Promise<string | z.infer<OutputSchema> | DeepAgentInterrupt>
+            }
+
+            this.validateThreadConfig(thread_id)
+            if (Object.keys(variables).length === 0) {
+                throw new Error("input required")
+            }
+
+            const humanMessages: HumanMessage[] = Object.entries(variables).map(
+                ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
+            )
+
+            const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
+            const systemPrompt = this.systemPromptWithMcp(resolvedPrompt)
+            const agent = await this.ensureAgent(systemPrompt, mcpTools)
+            const config = this.buildConfig(thread_id, context)
+
+            const result = await agent.invoke({ messages: humanMessages } as any, config)
+            if (debug) return result
+
+            return await this.mapInvokeResult(result)
+        } finally {
+            await mcpClient?.close()
         }
-
-        this.validateThreadConfig(thread_id)
-        if (Object.keys(variables).length === 0) {
-            throw new Error("input required")
-        }
-
-        const humanMessages: HumanMessage[] = Object.entries(variables).map(
-            ([key, value]) => new HumanMessage(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
-        )
-
-        const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
-        const systemPrompt = blocksToSystemPrompt(resolvedPrompt)
-        const agent = await this.ensureAgent(systemPrompt)
-        const config = this.buildConfig(thread_id, context)
-
-        const result = await agent.invoke({ messages: humanMessages } as any, config)
-        if (debug) return result
-
-        return this.mapInvokeResult(result)
     }
 
     public stream(
@@ -464,20 +506,24 @@ export class DeepAgent<
         const { thread_id, decision, decisions, context, promptVars, showToolCalls, ...variables } = invokeInput
         const isResume = decision !== undefined || decisions !== undefined
 
-        if (isResume) {
-            this.validateHitlResume(thread_id, variables)
-            yield* this.runResumeStream({
-                thread_id: thread_id!,
-                context,
-                decision,
-                decisions,
-                showToolCalls: showToolCalls === true,
-            })
-            return
-        }
-
         this.should_use_output = false
+        const mcpClient = buildMcpClient(this.mcpServer)
         try {
+            const mcpTools = mcpClient ? await mcpClient.getTools() : []
+
+            if (isResume) {
+                this.validateHitlResume(thread_id, variables)
+                yield* this.runResumeStream({
+                    thread_id: thread_id!,
+                    context,
+                    decision,
+                    decisions,
+                    showToolCalls: showToolCalls === true,
+                    mcpTools,
+                })
+                return
+            }
+
             this.validateThreadConfig(thread_id)
             if (Object.keys(variables).length === 0) {
                 throw new Error("input required")
@@ -488,8 +534,8 @@ export class DeepAgent<
             )
 
             const resolvedPrompt = await resolveSystemPromptBlocks(this.prompt, promptVars)
-            const systemPrompt = blocksToSystemPrompt(resolvedPrompt)
-            const agent = await this.ensureAgent(systemPrompt)
+            const systemPrompt = this.systemPromptWithMcp(resolvedPrompt)
+            const agent = await this.ensureAgent(systemPrompt, mcpTools)
             const config = this.buildConfig(thread_id, context)
 
             yield* this.runNativeStream(
@@ -500,6 +546,7 @@ export class DeepAgent<
             )
         } finally {
             this.should_use_output = true
+            await mcpClient?.close()
         }
     }
 

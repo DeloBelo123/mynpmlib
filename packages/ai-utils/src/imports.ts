@@ -147,7 +147,7 @@ export {
     BaseCheckpointSaver,
     Command,
     MultiServerMCPClient,
-    OAuthClientProvider
+    type OAuthClientProvider,
 }
 
 // Checkpoint Savers (optional - Packages müssen installiert sein)

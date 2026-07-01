@@ -1,6 +1,9 @@
 import { DynamicStructuredTool } from "@langchain/core/tools"
-import type { ExtractToolNames } from "./zodios/CombinedRegistry"
 import { z } from "zod/v4"
+
+export type ExtractToolNames<T extends readonly {name:string}[]> = {
+    [K in keyof T]: T[K] extends {name:string} ? T[K]['name'] : never
+}[number]
 
 export interface Tool {
     name:string
