@@ -10,7 +10,7 @@ import {
 } from "../imports"
 import { turn_to_docs, baseSplitter } from "../helpers/rag"
 import { z } from "zod/v4"
-import { getLLM } from "../helpers/llms"
+import { getLLM } from "../helpers/llm/llms"
 
 /** Output-Schema für .invoke(): z.object() oder z.record() (Zod v4). */
 export type OutputSchema = z.ZodObject | z.ZodRecord
@@ -27,6 +27,24 @@ export interface InvokeInputBase {
     debug?: boolean
     promptVars?: Record<string, any>
     [key: string]: any
+}
+
+/** Reasoning-Delta im Stream — kommt nur bei `showReasoning: true` und nur, wenn das Model Reasoning liefert. */
+export type ReasoningEvent = { kind: "reasoning"; text: string }
+
+/**
+ * Liest das Reasoning-Delta aus einem LangChain-Message-Chunk: `reasoning_content`
+ * (mappt @langchain/openai selbst) bzw. OpenRouters `delta.reasoning` aus der
+ * Roh-Response (nur vorhanden, wenn das LLM mit `__includeRawResponse` gebaut wurde).
+ */
+export function extractReasoningDelta(messageChunk: any): string | undefined {
+    const kwargs = messageChunk?.additional_kwargs
+    if (typeof kwargs?.reasoning_content === "string" && kwargs.reasoning_content.length > 0) {
+        return kwargs.reasoning_content
+    }
+    const raw = kwargs?.__raw_response?.choices?.[0]?.delta?.reasoning
+    if (typeof raw === "string" && raw.length > 0) return raw
+    return undefined
 }
 
 interface ChainProps<T extends OutputSchema>{
@@ -130,12 +148,15 @@ export class Chain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> {
     }
 
 
-    public async *stream(input: Record<string, any> & { debug?: boolean }): AsyncGenerator<string, void, unknown> {
+    public stream(input: Record<string, any> & { debug?: boolean; showReasoning: true }): AsyncGenerator<string | ReasoningEvent, void, unknown>
+    public stream(input: Record<string, any> & { debug?: boolean }): AsyncGenerator<string, void, unknown>
+    public async *stream(input: Record<string, any> & { debug?: boolean; showReasoning?: boolean }): AsyncGenerator<string | ReasoningEvent, void, unknown> {
         const messagesArray = [...this.prompt]
         // Beim Streamen KEIN Schema-Prompt - nur reiner Text
         if(this.vectorStore) messagesArray.push(["system", "Hier ist relevanter Kontext:\n{context}"])
             for(const key in input){
                 if(key === "debug") continue
+                if(key === "showReasoning") continue
                 if(key === "thread_id"){
                     console.error("eine normale chain hat keine memory, deswegen wird thread_id ignoriert")
                     continue
@@ -163,6 +184,10 @@ export class Chain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> {
             const stream = await streamChain.stream({...invokeInput, context: contextText})
             
             for await (const chunk of stream) {
+                if (input.showReasoning) {
+                    const reasoning = extractReasoningDelta(chunk)
+                    if (reasoning) yield { kind: "reasoning", text: reasoning }
+                }
                 if (chunk && typeof chunk === 'object' && 'content' in chunk) {
                     yield chunk.content as string
                 } else if (typeof chunk === 'string') {
@@ -176,6 +201,10 @@ export class Chain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> {
             
             const stream = await streamChain.stream(invokeInput)
             for await (const chunk of stream) {
+                if (input.showReasoning) {
+                    const reasoning = extractReasoningDelta(chunk)
+                    if (reasoning) yield { kind: "reasoning", text: reasoning }
+                }
                 if (chunk && typeof chunk === 'object' && 'content' in chunk) {
                     yield chunk.content as string
                 } else if (typeof chunk === 'string') {

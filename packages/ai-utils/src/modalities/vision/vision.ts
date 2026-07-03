@@ -1,7 +1,10 @@
 import { HumanMessage } from "../../imports"
-import { getLLM, OpenRouterVisionModel } from "../../helpers/llms"
+import { getLLM, type OpenRouterModel } from "../../helpers/llm/llms"
 import { LLMInstance, getOpenRouterRuntime } from "../openrouter"
 import { normalizeVisionImage, VisionImageInput } from "./helpers"
+
+/** Viele OpenRouter Chat-Modelle sind vision-fähig; deshalb bewusst auf die Chat-Union vereinfacht. */
+export type OpenRouterVisionModel = OpenRouterModel
 
 type VisionOptions = {
     llm?: LLMInstance
@@ -16,7 +19,7 @@ type VisionOptions = {
  *
  * Internally this function sends `image_url` content parts through OpenRouter's
  * chat-completions-compatible interface. If no `llm` is provided, it builds one
- * with `getLLM({ provider: "openrouter", type: "vision" })` and reads
+ * with `getLLM({ provider: "openrouter" })` and reads
  * `process.env.OPENROUTER_API_KEY`.
  *
  * Make sure `OPENROUTER_API_KEY` is set in your `.env`.
@@ -32,7 +35,7 @@ type VisionOptions = {
  * CONFIG:
  * ```ts
  * vision({
- *     llm = getLLM({ provider: "openrouter", type: "vision" }),
+ *     llm = getLLM({ provider: "openrouter" }),
  *     prompt = "Describe the image in detail.",
  *     detail = "auto",
  *     images,
@@ -51,7 +54,7 @@ type VisionOptions = {
  * ```
  */
 export async function vision({
-    llm = getLLM({ provider: "openrouter", type: "vision" }),
+    llm = getLLM({ provider: "openrouter" }),
     prompt = "Describe the image in detail.",
     detail = "auto",
     images,
@@ -74,7 +77,6 @@ export async function vision({
         model && model !== runtime.model
             ? getLLM({
                   provider: "openrouter",
-                  type: "vision",
                   model,
                   apikey: runtime.apiKey
               })

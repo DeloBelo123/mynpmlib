@@ -1,6 +1,6 @@
 import { z } from "zod/v4"
 import { PromptTemplate } from "@langchain/core/prompts"
-import type { InvokeInputBase, OutputSchema } from "./chain"
+import { extractReasoningDelta, type InvokeInputBase, type OutputSchema, type ReasoningEvent } from "./chain"
 import { DynamicStructuredTool} from "../imports"
 import { BaseChatModel } from "../imports"
 import { BaseCheckpointSaver } from "../imports"
@@ -8,7 +8,7 @@ import { createReactAgent } from "../imports"
 import { HumanMessage} from "../imports"
 
 import { structure } from "../magic-funcs/parsers/structure"
-import { getLLM } from "../helpers/llms"
+import { getLLM } from "../helpers/llm/llms"
 import { buildMcpClient, buildMcpPromptBlock, type MCPServersInput } from "./tools/MCP"
 
 async function resolveSystemPromptBlocks(
@@ -162,11 +162,13 @@ export class Agent<T extends OutputSchema | undefined = undefined> {
         }
     }
 
-    public async *stream(invokeInput: InvokeInputBase & { thread_id?: string; stream_delay?: number }): AsyncGenerator<string, void, unknown> {
+    public stream(invokeInput: InvokeInputBase & { thread_id?: string; stream_delay?: number; showReasoning: true }): AsyncGenerator<string | ReasoningEvent, void, unknown>
+    public stream(invokeInput: InvokeInputBase & { thread_id?: string; stream_delay?: number }): AsyncGenerator<string, void, unknown>
+    public async *stream(invokeInput: InvokeInputBase & { thread_id?: string; stream_delay?: number; showReasoning?: boolean }): AsyncGenerator<string | ReasoningEvent, void, unknown> {
         this.should_use_output = false
         const mcpClient = buildMcpClient(this.mcpServer)
         try {
-            const { thread_id, promptVars, ...variables } = invokeInput
+            const { thread_id, promptVars, showReasoning, ...variables } = invokeInput
 
             if (this.checkpointer && !thread_id) throw new Error("thread_id is required when using checkpointer, else no state is stored")
             if (!this.checkpointer && thread_id) console.warn("WARN: thread_id is provided but no checkpointer is set, so no state is stored")
@@ -207,6 +209,11 @@ export class Agent<T extends OutputSchema | undefined = undefined> {
 
                 if (node === "tools" || messageType === "tool") {
                     continue
+                }
+
+                if (showReasoning) {
+                    const reasoning = extractReasoningDelta(messageChunk)
+                    if (reasoning) yield { kind: "reasoning", text: reasoning }
                 }
 
                 const raw = messageChunk?.content

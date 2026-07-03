@@ -1,5 +1,5 @@
 import { createSimpleChain } from "../../helpers/helpers"
-import { getLLM } from "../../helpers/llms"
+import { getLLM } from "../../helpers/llm/llms"
 import { BaseChatModel, ChatPromptTemplate, StringOutputParser } from "../../imports"
 
 /**

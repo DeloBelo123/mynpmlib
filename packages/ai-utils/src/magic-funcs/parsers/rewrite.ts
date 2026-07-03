@@ -2,7 +2,7 @@ import { StringOutputParser } from "@langchain/core/output_parsers"
 import { createSimpleChain } from "../../helpers/helpers"
 import { BaseChatModel } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
-import { getLLM } from "../../helpers/llms"
+import { getLLM } from "../../helpers/llm/llms"
 
 /**
  * Schreibt Input nach einer konkreten Anweisung um.

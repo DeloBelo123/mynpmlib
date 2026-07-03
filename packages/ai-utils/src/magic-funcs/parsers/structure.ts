@@ -3,7 +3,7 @@ import { BaseChatModel, StructuredOutputParser } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
 import type { OutputSchema } from "../../heart/chain"
 import { z } from "zod/v4"
-import { getLLM } from "../../helpers/llms"
+import { getLLM } from "../../helpers/llm/llms"
 
 /**
  * Bringt beliebigen Input in ein vorgegebenes Zod-Schema.

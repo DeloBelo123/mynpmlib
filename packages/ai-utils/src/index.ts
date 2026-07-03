@@ -19,10 +19,12 @@ export type {
     DeepAgentStreamChunk,
     DeepAgentStreamChunkWithTools,
     DeepAgentToolEvent,
+    DeepAgentReasoningEvent,
     DeepAgentUserDecision,
     DeepAgentRunInputBase,
     DeepAgentHitlFields,
     DeepAgentShowToolCallsField,
+    DeepAgentShowReasoningField,
     DeepAgentInterruptConfig,
     DeepAgentInterruptToolCall,
     DeepAgentInterruptQuestion,
@@ -38,9 +40,7 @@ export * from "./magic-funcs/parsers/structure"
 export * from "./magic-funcs/parsers/summarize"
 export * from "./heart/tools/Tavily"
 export * from "./helpers/chatbot"
-export * from "./helpers/llms"
-export * from "./helpers/cli-llms"
-export * from "./modalities/speech/stt/stt"
-export * from "./modalities/speech/tts/tts"
+export * from "./helpers/llm/llms"
+export * from "./helpers/llm/cli-llms"
 export * from "./modalities/vision/vision"
 export * from "./modalities/image-gen/generateImages"

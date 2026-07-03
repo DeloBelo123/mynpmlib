@@ -7,7 +7,7 @@ Ein praktisches Utility-Package für LLM-Apps mit LangChain:
 - RAG-Helper (FAISS, Supabase, In-Memory)
 - Tooling (`ToolRegistry`, `CombinedToolRegistry`, `ZodiosToolRegistry`, `createRAGTool`, `tavilySearchTool`)
 - Magic-Funcs (Parser, Evaluator, Optimizer, Answerer)
-- Modalities (STT, TTS, Vision, Image Generation)
+- Modalities (Vision, Image Generation)
 
 ---
 
@@ -20,7 +20,7 @@ Im Package gilt als Standard-LLM-Default für die allgemeine Nutzung:
 
 Wenn du nichts explizit setzt, orientiere dich an diesem Default in deinen Aufrufen.
 
-Für modality-spezifische Flows (`stt`, `tts`, `vision`, `image-gen`) wird zusätzlich mit `type` gearbeitet, damit passende Modelle gewählt werden können.
+Für kostenlose Modelle gibt es bei `provider: "openrouter"` die Option `free: true` — sie wählt dynamisch das beste aktuell kostenlose `:free`-Model (siehe Schnellstart).
 
 ---
 
@@ -76,13 +76,37 @@ const llmGroq = getLLM({ provider: "chatgroq", model: "llama-3.3-70b-versatile" 
 const llmLocal = getLLM({ provider: "local", model: "llama3.2:3b" })
 ```
 
-Modality-spezifisch:
+Kostenloses Model (OpenRouter):
 
 ```ts
-getLLM({ provider: "openrouter", type: "stt" })
-getLLM({ provider: "openrouter", type: "tts" })
-getLLM({ provider: "openrouter", type: "vision" })
-getLLM({ provider: "openrouter", type: "image-gen" })
+// free: true → getLLM wird async und wählt live das beste aktuell
+// kostenlose :free-Model mit Tool-Support. Doppel-Ranking: Intelligenz
+// (sort=intelligence-high-to-low) UND Latenz (sort=latency-low-to-high),
+// kombiniert per Rang-Summe — schlau, aber kein lahmer Reasoning-Brocken.
+// Kein model-Prop erlaubt.
+const llm = await getLLM({ provider: "openrouter", free: true })
+
+console.log(llm.model) // z.B. "openai/gpt-oss-120b:free"
+```
+
+Verschwindet das gewählte Model später oder ist es nicht mehr gratis (400/402/403/404), heilt sich die Instanz selbst: nächstbestes `:free`-Model holen, `model` tauschen, Request transparent wiederholen.
+
+**Free-Limits & `FreeLimitError`:** OpenRouter begrenzt `:free`-Models account-weit auf 20 Requests/Minute und 50 Requests/Tag (bzw. 1000/Tag ab 10 gekauften Credits). Weil ein Model-Wechsel dagegen nicht hilft, wird bei 429 nicht geheilt, sondern ein typisierter `FreeLimitError` geworfen — sauber filterbar fürs Frontend:
+
+```ts
+import { FreeLimitError } from "@delofarag/ai-utils"
+
+try {
+    await llm.invoke(messages)
+} catch (e) {
+    if (e instanceof FreeLimitError && e.scope === "day") {
+        // e.code === "FREE_LIMIT_EXCEEDED" (überlebt auch JSON-Serialisierung)
+        // e.retryAfterSeconds → Sekunden bis zum Reset, falls der Server sie liefert
+        showToast("Sie haben Ihre Free-Requests für heute verbraucht.")
+    } else if (e instanceof FreeLimitError && e.scope === "minute") {
+        showToast("Kurz durchatmen — max. 20 Free-Requests pro Minute.")
+    }
+}
 ```
 
 EU-Datenrouting (OpenRouter):
@@ -899,42 +923,6 @@ const short = await summarize({
 
 ## Modalities
 
-### STT
-
-- `stt(...)`
-- `createSTTPhoneSocketSession(...)` für live phone socket chunks (Twilio/Telnyx-style)
-
-```ts
-import { stt } from "@delofarag/ai-utils"
-
-const result = await stt({
-    audio: "./call.wav",
-    prompt: "Transcribe in German."
-})
-```
-
-### TTS
-
-- `tts(...)`
-- `streamTTSOverPhoneSocket(...)` für chunked outbound audio
-
-```ts
-import { tts, streamTTSOverPhoneSocket } from "@delofarag/ai-utils"
-
-const speech = await tts({
-    text: "Willkommen beim Support.",
-    model: "nova"
-})
-
-await streamTTSOverPhoneSocket({
-    text: "Einen Moment bitte.",
-    model: "nova",
-    onChunk: async (chunk) => {
-        // socket send
-    }
-})
-```
-
 ### Vision
 
 ```ts
@@ -1036,7 +1024,7 @@ Top-level Exports (`@delofarag/ai-utils`):
 - Memory (`MemorySaver`, `SmartCheckpointSaver`, `SupabaseCheckpointSaver`, `chatSummarizer`)
 - Tools (`ToolRegistry`, `CombinedToolRegistry`, `ZodiosToolRegistry`, `Tavily`, `RAGTool`)
 - Magic-Funcs (answerers/evaluators/parsers/optimizers)
-- Modalities (`stt`, `tts`, `vision`, `generateImages`)
+- Modalities (`vision`, `generateImages`)
 
 Client-Subpath (`@delofarag/ai-utils/client`) — ohne LangChain-Bundle, für Frontend:
 

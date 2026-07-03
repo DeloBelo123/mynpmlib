@@ -1,6 +1,6 @@
 import { SupabaseTable } from "@delofarag/supabase-utils"
 import { createSimpleChain } from "./helpers"
-import { getLLM } from "./llms"
+import { getLLM } from "./llm/llms"
 import {
     BaseCheckpointSaver,
     BaseMessage,

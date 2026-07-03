@@ -1,7 +1,30 @@
 import { HumanMessage } from "../../imports"
-import { getLLM, OpenRouterImageGenModel } from "../../helpers/llms"
+import { getLLM, type AutoComplete } from "../../helpers/llm/llms"
 import { LLMInstance, getOpenRouterRuntime } from "../openrouter"
 import { extractImageUrls, ImageConfig, ImageGenModalities } from "./helpers"
+
+/** OpenRouter image-generation models via `output_modalities=image` (2026-04). */
+export type OpenRouterImageGenModel = AutoComplete<
+    | "black-forest-labs/flux.2-flex"
+    | "black-forest-labs/flux.2-klein-4b"
+    | "black-forest-labs/flux.2-max"
+    | "black-forest-labs/flux.2-pro"
+    | "bytedance-seed/seedream-4.5"
+    | "google/gemini-2.5-flash-image"
+    | "google/gemini-3-pro-image-preview"
+    | "google/gemini-3.1-flash-image-preview"
+    | "openai/gpt-5-image"
+    | "openai/gpt-5-image-mini"
+    | "openai/gpt-5.4-image-2"
+    | "openrouter/auto"
+    | "sourceful/riverflow-v2-fast"
+    | "sourceful/riverflow-v2-fast-preview"
+    | "sourceful/riverflow-v2-max-preview"
+    | "sourceful/riverflow-v2-pro"
+    | "sourceful/riverflow-v2-standard-preview"
+>
+
+const DEFAULT_IMAGE_GEN_MODEL: OpenRouterImageGenModel = "google/gemini-3.1-flash-image-preview"
 
 type ImageGenOptions = {
     llm?: LLMInstance
@@ -16,7 +39,7 @@ type ImageGenOptions = {
  *
  * Internally this function calls OpenRouter through the chat-completions-compatible
  * interface with `modalities` and optional `image_config`. If no `llm` is provided,
- * it creates one with `getLLM({ provider: "openrouter", type: "image-gen" })` and
+ * it creates one with `getLLM({ provider: "openrouter", model: "google/gemini-3.1-flash-image-preview" })` and
  * reads `process.env.OPENROUTER_API_KEY`.
  *
  * Make sure `OPENROUTER_API_KEY` is set in your `.env`.
@@ -32,7 +55,7 @@ type ImageGenOptions = {
  * CONFIG:
  * ```ts
  * generateImages({
- *     llm = getLLM({ provider: "openrouter", type: "image-gen" }),
+ *     llm = getLLM({ provider: "openrouter", model: "google/gemini-3.1-flash-image-preview" }),
  *     modalities = ["image", "text"],
  *     imageConfig = { aspect_ratio: "1:1", image_size: "2K" },
  *     model,
@@ -51,7 +74,7 @@ type ImageGenOptions = {
  * ```
  */
 export async function generateImages({
-    llm = getLLM({ provider: "openrouter", type: "image-gen" }),
+    llm = getLLM({ provider: "openrouter", model: DEFAULT_IMAGE_GEN_MODEL }),
     modalities = ["image", "text"],
     imageConfig = { aspect_ratio: "1:1", image_size: "2K" },
     model,
@@ -62,7 +85,6 @@ export async function generateImages({
         model && model !== runtime.model
             ? getLLM({
                   provider: "openrouter",
-                  type: "image-gen",
                   model,
                   apikey: runtime.apiKey
               })

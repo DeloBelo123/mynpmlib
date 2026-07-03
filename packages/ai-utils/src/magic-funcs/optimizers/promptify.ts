@@ -1,4 +1,4 @@
-import { getLLM } from "../../helpers/llms"
+import { getLLM } from "../../helpers/llm/llms"
 import { BaseChatModel } from "../../imports"
 import { ChatPromptTemplate } from "../../imports"
 import { createSimpleChain } from "../../helpers/helpers"

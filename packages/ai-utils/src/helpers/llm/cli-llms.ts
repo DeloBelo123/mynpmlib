@@ -12,8 +12,8 @@ import {
   ChatGenerationChunk,
   type ChatResult,
   type CallbackManagerForLLMRun,
-} from "../imports"
-import type { AutoComplete } from "./llms"
+} from "../../imports"
+import type { AutoComplete } from "./types"
 import { spawn } from "node:child_process"
 import { createInterface } from "node:readline"
 import { tmpdir } from "node:os"

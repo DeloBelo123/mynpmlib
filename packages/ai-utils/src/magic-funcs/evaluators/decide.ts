@@ -4,7 +4,7 @@ import { ChatPromptTemplate } from "../../imports"
 
 import { StructuredOutputParser } from "../../imports"
 import { createSimpleChain } from "../../helpers/helpers"
-import { getLLM } from "../../helpers/llms"
+import { getLLM } from "../../helpers/llm/llms"
 
 const decideSchema = z.object({
     decision: z.enum(["yes", "no", "unclear"])

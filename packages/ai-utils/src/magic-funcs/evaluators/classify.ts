@@ -4,7 +4,7 @@ import { ChatPromptTemplate } from "../../imports"
 import { z } from "zod/v4"
 
 import { StructuredOutputParser } from "../../imports"
-import { getLLM } from "../../helpers/llms"
+import { getLLM } from "../../helpers/llm/llms"
 
 function createClassificationSchema<T extends readonly [string, ...string[]]>(classes: T) {
     return z.object({

@@ -1,4 +1,4 @@
-import { getLLM } from "../helpers/llms"
+import { getLLM } from "../helpers/llm/llms"
 
 export type LLMInstance = ReturnType<typeof getLLM>
 

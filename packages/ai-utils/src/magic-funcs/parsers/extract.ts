@@ -4,7 +4,7 @@ import { ChatPromptTemplate } from "../../imports"
 import { z } from "zod/v4"
 
 import { StructuredOutputParser } from "../../imports"
-import { getLLM } from "../../helpers/llms"
+import { getLLM } from "../../helpers/llm/llms"
 
 /**
  * Extrahiert strukturierte Daten aus unstrukturiertem Input anhand eines Zod-Schemas.

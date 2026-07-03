@@ -1,5 +1,5 @@
 import { BaseChatModel } from "../imports"
-import { getLLM } from "../helpers/llms"
+import { getLLM } from "../helpers/llm/llms"
 import { z } from "zod"
 
 interface HermesAgentInit {

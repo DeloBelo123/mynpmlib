@@ -1,4 +1,4 @@
-import { AutoComplete } from "../../helpers/llms"
+import { AutoComplete } from "../../helpers/llm/llms"
 
 export type ImageGenModalities = ["image"] | ["image", "text"] | ["text", "image"]
 

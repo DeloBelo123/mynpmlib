@@ -7,13 +7,10 @@ import {
     type LocalShellBackendOptions,
 } from "../../imports"
 import type { ExecuteCapableDeepAgentBackend } from "./interruptOn"
+import type { Prettify } from "../llm/types"
 
 /** Native deepagents-Backend — Instanz oder Factory, kein Promise. */
 export type DeepAgentBackend = NonNullable<CreateDeepAgentParams["backend"]>
-
-type Prettify<T> = {
-    [K in keyof T]: T[K]
-} & {}
 
 export type CreateLocalShellBackendOptions = Prettify<
     Omit<LocalShellBackendOptions, "rootDir"> & {

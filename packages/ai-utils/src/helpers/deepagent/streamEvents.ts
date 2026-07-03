@@ -1,5 +1,6 @@
-import type { DeepAgentInterrupt, DeepAgentToolEvent } from "./interruptTypes"
+import type { DeepAgentInterrupt, DeepAgentToolEvent, DeepAgentReasoningEvent } from "./interruptTypes"
 import { extractInterruptFromStreamUpdate } from "./interruptOn"
+import { extractReasoningDelta } from "../../heart/chain"
 
 function getMessageChunk(chunk: unknown) {
     return Array.isArray(chunk) ? chunk[0] : chunk
@@ -119,15 +120,21 @@ export function extractTextFromStreamMessageChunk(chunk: unknown): string | unde
     return undefined
 }
 
+export function extractReasoningFromMessageChunk(chunk: unknown): DeepAgentReasoningEvent | undefined {
+    const text = extractReasoningDelta(getMessageChunk(chunk))
+    return text ? { kind: "reasoning", text } : undefined
+}
+
 export function mapNativeStreamChunk(
     chunk: unknown,
     opts: {
         interruptOn: boolean
         showToolCalls: boolean
+        showReasoning: boolean
         seenToolStarts: Set<string>
     },
-): Array<string | DeepAgentInterrupt | DeepAgentToolEvent> {
-    const out: Array<string | DeepAgentInterrupt | DeepAgentToolEvent> = []
+): Array<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent> {
+    const out: Array<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent> = []
 
     const isMultimode = Array.isArray(chunk)
         && chunk.length === 2
@@ -150,6 +157,10 @@ export function mapNativeStreamChunk(
                 const toolEnd = extractToolEndFromMessageChunk(data)
                 if (toolEnd) out.push(toolEnd)
             }
+            if (opts.showReasoning) {
+                const reasoning = extractReasoningFromMessageChunk(data)
+                if (reasoning) out.push(reasoning)
+            }
             const text = extractTextFromStreamMessageChunk(data)
             if (text) out.push(text)
             return out
@@ -163,6 +174,11 @@ export function mapNativeStreamChunk(
         }
         const toolEnd = extractToolEndFromMessageChunk(chunk)
         if (toolEnd) out.push(toolEnd)
+    }
+
+    if (opts.showReasoning) {
+        const reasoning = extractReasoningFromMessageChunk(chunk)
+        if (reasoning) out.push(reasoning)
     }
 
     const text = extractTextFromStreamMessageChunk(chunk)
