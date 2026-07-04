@@ -42,6 +42,12 @@ interface AgentProps<T extends OutputSchema | undefined = undefined>{
      * die Tools per getTools() geladen und der Client am Ende wieder geschlossen.
      */
     mcpServer?: MCPServersInput
+    /**
+     * Rein deskriptiver Freitext: wofür der Agent da ist, was er macht.
+     * Der Agent selbst nutzt das NICHT — es dient nur als Kontext für externe
+     * Tools (z.B. die agent-tui `/eval`-Bewertung).
+     */
+    describe?: string
 }
 
 /**
@@ -76,13 +82,14 @@ interface AgentProps<T extends OutputSchema | undefined = undefined>{
  * @param output - Zod-Schema: beschreibt die Struktur des Rückgabewerts von .invoke()
  */
 export class Agent<T extends OutputSchema | undefined = undefined> {
-    private prompt: Array<["system", string]>
-    private tools: DynamicStructuredTool[]
-    private llm: BaseChatModel
-    private output: T | undefined
-    private agent: any
-    private checkpointer: BaseCheckpointSaver | undefined
-    private mcpServer: MCPServersInput | undefined
+    public prompt: Array<["system", string]>
+    public tools: DynamicStructuredTool[]
+    public llm: BaseChatModel
+    public output: T | undefined
+    public agent: any
+    public checkpointer: BaseCheckpointSaver | undefined
+    public mcpServer: MCPServersInput | undefined
+    public describe: string | undefined
     private should_use_output: boolean = true
 
     constructor({
@@ -92,6 +99,7 @@ export class Agent<T extends OutputSchema | undefined = undefined> {
         output,
         checkpointer,
         mcpServer,
+        describe,
     }: AgentProps<T>) {
         this.prompt = typeof prompt === "string" ? [["system", prompt]] : Array.isArray(prompt) ? prompt.map((p:string)=>{
             if(typeof p === "string"){
@@ -110,6 +118,7 @@ export class Agent<T extends OutputSchema | undefined = undefined> {
         this.output = output
         this.checkpointer = checkpointer
         this.mcpServer = mcpServer
+        this.describe = describe
     }
 
     /** bruder ich weiss functional overloading tot aber muss hier sein! so kann sicher gesagt werden: wenn kein output gesetzt = string, wenn doch = z.infer<output>! */

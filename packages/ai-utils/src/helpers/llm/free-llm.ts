@@ -44,34 +44,17 @@ async function fetchFreeRanking(baseURL: string, sort: string): Promise<string[]
 }
 
 /**
- * Holt das beste kostenlose Model von OpenRouter — Doppel-Ranking aus
- * Intelligenz UND Latenz.
+ * Holt das beste kostenlose Model von OpenRouter — reines Intelligenz-Ranking.
  *
- * Zwei parallele Queries (`max_price=0` + `supported_parameters=tools`, einmal
- * `sort=intelligence-high-to-low`, einmal `sort=latency-low-to-high`), dann
- * gewinnt die kleinste Rang-Summe: so schlau wie möglich, ohne bei einem
- * lahmen 550B-Reasoning-Brocken zu landen, der pro Antwort ewig "nachdenkt".
+ * Eine Query (`max_price=0` + `supported_parameters=tools`,
+ * `sort=intelligence-high-to-low`); es gewinnt das intelligenteste :free-Model.
  * Kein Test-Request — tote Kandidaten fängt das Self-Healing der Instanz ab.
  */
 export async function fetchBestFreeModel(baseURL: string = OPENROUTER_BASE_URL): Promise<string> {
-  const [byIntelligence, byLatency] = await Promise.all([
-    fetchFreeRanking(baseURL, "intelligence-high-to-low"),
-    fetchFreeRanking(baseURL, "latency-low-to-high"),
-  ])
-
-  // Fehlt ein Model in einem der Rankings, bekommt es dort den schlechtesten Rang.
-  const worstRank = Math.max(byIntelligence.length, byLatency.length)
-  const latencyRank = new Map(byLatency.map((id, rank) => [id, rank]))
-
-  const ranked = byIntelligence
-    .map((id, intelligenceRank) => ({
-      id,
-      score: intelligenceRank + (latencyRank.get(id) ?? worstRank),
-    }))
-    .sort((a, b) => a.score - b.score)
+  const byIntelligence = await fetchFreeRanking(baseURL, "intelligence-high-to-low")
 
   // Sind alle Kandidaten ausgeschlossen, lieber den besten erneut versuchen als hart failen.
-  const pick = ranked.find((candidate) => !excludedFreeModels.has(candidate.id))?.id ?? ranked[0]?.id
+  const pick = byIntelligence.find((id) => !excludedFreeModels.has(id)) ?? byIntelligence[0]
   if (!pick) {
     throw new Error("No :free model with tool support available on OpenRouter right now")
   }

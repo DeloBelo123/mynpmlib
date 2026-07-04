@@ -23,8 +23,10 @@ import type {
     DeepAgentHitlFields,
     DeepAgentShowToolCallsField,
     DeepAgentShowReasoningField,
+    DeepAgentShowSubagentsField,
     DeepAgentToolEvent,
     DeepAgentReasoningEvent,
+    DeepAgentSubagentEvent,
     DeepAgentUserDecision,
 } from "../helpers/deepagent/interruptTypes"
 import {
@@ -67,6 +69,12 @@ interface DeepAgentProps<
      * (Neuaufbau pro Aufruf), damit close() den Client nicht für Folge-Calls killt.
      */
     mcpServer?: MCPServersInput
+    /**
+     * Rein deskriptiver Freitext: wofür der Agent da ist, was er macht.
+     * Der Agent selbst nutzt das NICHT — es dient nur als Kontext für externe
+     * Tools (z.B. die agent-tui `/eval`-Bewertung).
+     */
+    describe?: string
 }
 
 async function resolveSystemPromptBlocks(
@@ -136,24 +144,25 @@ export class DeepAgent<
     TBackend extends DeepAgentBackend | undefined = undefined,
     THasInterrupt extends boolean = false,
 > {
-    private prompt: Array<["system", string]>
-    private tools: TTools
-    private llm: BaseChatModel
-    private output: T | undefined
-    private agent: any
+    public prompt: Array<["system", string]>
+    public tools: TTools
+    public llm: BaseChatModel
+    public output: T | undefined
+    public agent: any
     private agentCacheDirty = true
-    private checkpointer: BaseCheckpointSaver | boolean
-    private agentsMd: string[] | undefined
-    private subagents: SubAgent[] | undefined
-    private backend: TBackend | undefined
-    private permissions: FilesystemPermission[] | undefined
-    private skills: string[] | undefined
-    private middleware: AgentMiddleware[] | undefined
-    private interruptOn: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>> | undefined
-    private store: BaseStore | undefined
-    private name: string | undefined
-    private contextSchema: CreateDeepAgentParams["contextSchema"]
-    private mcpServer: MCPServersInput | undefined
+    public checkpointer: BaseCheckpointSaver | boolean
+    public agentsMd: string[] | undefined
+    public subagents: SubAgent[] | undefined
+    public backend: TBackend | undefined
+    public permissions: FilesystemPermission[] | undefined
+    public skills: string[] | undefined
+    public middleware: AgentMiddleware[] | undefined
+    public interruptOn: InterruptOnFor<DeepAgentInterruptableToolName<TTools, TBackend>> | undefined
+    public store: BaseStore | undefined
+    public name: string | undefined
+    public contextSchema: CreateDeepAgentParams["contextSchema"]
+    public mcpServer: MCPServersInput | undefined
+    public describe: string | undefined
     private should_use_output: boolean = true
 
     constructor({
@@ -173,6 +182,7 @@ export class DeepAgent<
         name,
         contextSchema,
         mcpServer,
+        describe,
     }: DeepAgentProps<T, TTools, TBackend> = {} as DeepAgentProps<T, TTools, TBackend>) {
         this.prompt = typeof prompt === "string"
             ? [["system", prompt]]
@@ -192,6 +202,7 @@ export class DeepAgent<
         this.name = name
         this.contextSchema = contextSchema
         this.mcpServer = mcpServer
+        this.describe = describe
     }
 
     static create<
@@ -359,9 +370,10 @@ export class DeepAgent<
         decisions?: DeepAgentUserDecision[]
         showToolCalls?: boolean
         showReasoning?: boolean
+        showSubagents?: boolean
         mcpTools?: DynamicStructuredTool[]
-    }): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent, void, unknown> {
-        const { thread_id, context, decision, decisions, showToolCalls = false, showReasoning = false, mcpTools = [] } = input
+    }): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent | DeepAgentSubagentEvent, void, unknown> {
+        const { thread_id, context, decision, decisions, showToolCalls = false, showReasoning = false, showSubagents = false, mcpTools = [] } = input
         this.should_use_output = false
         const seenToolStarts = new Set<string>()
 
@@ -384,6 +396,7 @@ export class DeepAgent<
                     interruptOn: true,
                     showToolCalls,
                     showReasoning,
+                    showSubagents,
                     seenToolStarts,
                 })) {
                     if (typeof mapped === "object" && mapped !== null && mapped.kind === "interrupt") {
@@ -404,7 +417,8 @@ export class DeepAgent<
         config: Record<string, unknown> | undefined,
         showToolCalls: boolean,
         showReasoning: boolean,
-    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent, void, unknown> {
+        showSubagents: boolean,
+    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent | DeepAgentSubagentEvent, void, unknown> {
         const streamMode = this.interruptOn || showToolCalls
             ? (["messages", "updates"] as const)
             : "messages"
@@ -419,6 +433,7 @@ export class DeepAgent<
                 interruptOn: Boolean(this.interruptOn),
                 showToolCalls,
                 showReasoning,
+                showSubagents,
                 seenToolStarts,
             })) {
                 if (typeof mapped === "object" && mapped !== null && mapped.kind === "interrupt") {
@@ -494,6 +509,10 @@ export class DeepAgent<
     // in InvokeInputBase) alle Aufrufe und der Return-Typ verliert die Event-Varianten.
     public stream(
         this: DeepAgent<T, TTools, TBackend, true>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields & DeepAgentShowToolCallsField & DeepAgentShowReasoningField & DeepAgentShowSubagentsField,
+    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent | DeepAgentSubagentEvent, void, unknown>
+    public stream(
+        this: DeepAgent<T, TTools, TBackend, true>,
         invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields & DeepAgentShowToolCallsField & DeepAgentShowReasoningField,
     ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent, void, unknown>
     public stream(
@@ -506,8 +525,16 @@ export class DeepAgent<
     ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentReasoningEvent, void, unknown>
     public stream(
         this: DeepAgent<T, TTools, TBackend, true>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields & DeepAgentShowSubagentsField,
+    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentSubagentEvent, void, unknown>
+    public stream(
+        this: DeepAgent<T, TTools, TBackend, true>,
         invokeInput: DeepAgentRunInputBase & DeepAgentHitlFields,
     ): AsyncGenerator<string | DeepAgentInterrupt, void, unknown>
+    public stream(
+        this: DeepAgent<T, TTools, TBackend, false>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentShowToolCallsField & DeepAgentShowReasoningField & DeepAgentShowSubagentsField,
+    ): AsyncGenerator<string | DeepAgentToolEvent | DeepAgentReasoningEvent | DeepAgentSubagentEvent, void, unknown>
     public stream(
         this: DeepAgent<T, TTools, TBackend, false>,
         invokeInput: DeepAgentRunInputBase & DeepAgentShowToolCallsField & DeepAgentShowReasoningField,
@@ -522,12 +549,16 @@ export class DeepAgent<
     ): AsyncGenerator<string | DeepAgentReasoningEvent, void, unknown>
     public stream(
         this: DeepAgent<T, TTools, TBackend, false>,
+        invokeInput: DeepAgentRunInputBase & DeepAgentShowSubagentsField,
+    ): AsyncGenerator<string | DeepAgentSubagentEvent, void, unknown>
+    public stream(
+        this: DeepAgent<T, TTools, TBackend, false>,
         invokeInput: DeepAgentRunInputBase,
     ): AsyncGenerator<string, void, unknown>
     public async *stream(
-        invokeInput: DeepAgentRunInputBase & Partial<DeepAgentHitlFields> & { showToolCalls?: boolean; showReasoning?: boolean },
-    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent, void, unknown> {
-        const { thread_id, decision, decisions, context, promptVars, showToolCalls, showReasoning, ...variables } = invokeInput
+        invokeInput: DeepAgentRunInputBase & Partial<DeepAgentHitlFields> & { showToolCalls?: boolean; showReasoning?: boolean; showSubagents?: boolean },
+    ): AsyncGenerator<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent | DeepAgentSubagentEvent, void, unknown> {
+        const { thread_id, decision, decisions, context, promptVars, showToolCalls, showReasoning, showSubagents, ...variables } = invokeInput
         const isResume = decision !== undefined || decisions !== undefined
 
         this.should_use_output = false
@@ -544,6 +575,7 @@ export class DeepAgent<
                     decisions,
                     showToolCalls: showToolCalls === true,
                     showReasoning: showReasoning === true,
+                    showSubagents: showSubagents === true,
                     mcpTools,
                 })
                 return
@@ -569,6 +601,7 @@ export class DeepAgent<
                 config as Record<string, unknown> | undefined,
                 showToolCalls === true,
                 showReasoning === true,
+                showSubagents === true,
             )
         } finally {
             this.should_use_output = true

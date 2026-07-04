@@ -1,4 +1,4 @@
-import type { DeepAgentInterrupt, DeepAgentToolEvent, DeepAgentReasoningEvent } from "./interruptTypes"
+import type { DeepAgentInterrupt, DeepAgentToolEvent, DeepAgentReasoningEvent, DeepAgentSubagentEvent } from "./interruptTypes"
 import { extractInterruptFromStreamUpdate } from "./interruptOn"
 import { extractReasoningDelta } from "../../heart/chain"
 
@@ -8,6 +8,22 @@ function getMessageChunk(chunk: unknown) {
 
 function getMessageMetadata(chunk: unknown) {
     return Array.isArray(chunk) ? chunk[1] : undefined
+}
+
+/**
+ * LangGraph-Provenienz eines Chunks. Der Hauptagent läuft im Root-Namespace
+ * (`""`), ein `task`-Subagent in einem verschachtelten NS (`tools:<id>|<node>`).
+ * Genau diese Info steckt in den Metadaten — hier lesen wir sie aus, statt sie
+ * (wie bisher) wegzuwerfen.
+ */
+function getCheckpointNamespace(chunk: unknown): string {
+    const metadata = getMessageMetadata(chunk) as any
+    return metadata?.langgraph_checkpoint_ns ?? metadata?.checkpoint_ns ?? ""
+}
+
+/** Verschachtelter Namespace (Tiefe > 1) ⇒ Text stammt aus einem Subagent-Subgraph. */
+function isSubagentChunk(chunk: unknown): boolean {
+    return getCheckpointNamespace(chunk).split("|").filter(Boolean).length > 1
 }
 
 function getMessageType(messageChunk: any): string | undefined {
@@ -125,16 +141,42 @@ export function extractReasoningFromMessageChunk(chunk: unknown): DeepAgentReaso
     return text ? { kind: "reasoning", text } : undefined
 }
 
+/**
+ * Text eines Chunks in den Output schieben — mit Herkunfts-Weiche:
+ * Subagent-Text (verschachtelter Namespace) leckt sonst als nackter String in
+ * den Haupt-Textstrom und sieht aus wie Text des Hauptagenten. Deshalb:
+ *  - Hauptagent (Root-NS)       → nackter String (wie bisher)
+ *  - Subagent (verschachtelt)   → nur mit `showSubagents` als eigenes Event,
+ *                                 sonst verworfen (Default behebt das Leck)
+ */
+function pushTextFromChunk(
+    chunkData: unknown,
+    showSubagents: boolean,
+    out: Array<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent | DeepAgentSubagentEvent>,
+) {
+    const text = extractTextFromStreamMessageChunk(chunkData)
+    if (!text) return
+    if (isSubagentChunk(chunkData)) {
+        if (showSubagents) {
+            out.push({ kind: "subagent", text, namespace: getCheckpointNamespace(chunkData) })
+        }
+        return
+    }
+    out.push(text)
+}
+
 export function mapNativeStreamChunk(
     chunk: unknown,
     opts: {
         interruptOn: boolean
         showToolCalls: boolean
         showReasoning: boolean
+        showSubagents?: boolean
         seenToolStarts: Set<string>
     },
-): Array<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent> {
-    const out: Array<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent> = []
+): Array<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent | DeepAgentSubagentEvent> {
+    const out: Array<string | DeepAgentInterrupt | DeepAgentToolEvent | DeepAgentReasoningEvent | DeepAgentSubagentEvent> = []
+    const showSubagents = opts.showSubagents === true
 
     const isMultimode = Array.isArray(chunk)
         && chunk.length === 2
@@ -161,8 +203,7 @@ export function mapNativeStreamChunk(
                 const reasoning = extractReasoningFromMessageChunk(data)
                 if (reasoning) out.push(reasoning)
             }
-            const text = extractTextFromStreamMessageChunk(data)
-            if (text) out.push(text)
+            pushTextFromChunk(data, showSubagents, out)
             return out
         }
         return out
@@ -181,7 +222,6 @@ export function mapNativeStreamChunk(
         if (reasoning) out.push(reasoning)
     }
 
-    const text = extractTextFromStreamMessageChunk(chunk)
-    if (text) out.push(text)
+    pushTextFromChunk(chunk, showSubagents, out)
     return out
 }
