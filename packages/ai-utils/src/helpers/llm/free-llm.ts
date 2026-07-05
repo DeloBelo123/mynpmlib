@@ -50,11 +50,18 @@ async function fetchFreeRanking(baseURL: string, sort: string): Promise<string[]
  * `sort=intelligence-high-to-low`); es gewinnt das intelligenteste :free-Model.
  * Kein Test-Request — tote Kandidaten fängt das Self-Healing der Instanz ab.
  */
-export async function fetchBestFreeModel(baseURL: string = OPENROUTER_BASE_URL): Promise<string> {
+export async function fetchBestFreeModel(
+  baseURL: string = OPENROUTER_BASE_URL,
+  /** Zusätzlich zu überspringende Model-ids (z.B. temporär, für transiente Heals). */
+  extraExcluded?: Set<string>,
+): Promise<string> {
   const byIntelligence = await fetchFreeRanking(baseURL, "intelligence-high-to-low")
 
   // Sind alle Kandidaten ausgeschlossen, lieber den besten erneut versuchen als hart failen.
-  const pick = byIntelligence.find((id) => !excludedFreeModels.has(id)) ?? byIntelligence[0]
+  const pick =
+    byIntelligence.find((id) => !excludedFreeModels.has(id) && !extraExcluded?.has(id)) ??
+    byIntelligence.find((id) => !excludedFreeModels.has(id)) ??
+    byIntelligence[0]
   if (!pick) {
     throw new Error("No :free model with tool support available on OpenRouter right now")
   }
@@ -151,7 +158,64 @@ function isModelGoneError(error: unknown): boolean {
   return /not a valid model id|no endpoints found/i.test(message)
 }
 
+/**
+ * Erkennt TRANSIENTE Upstream-/Kapazitätsfehler eines konkreten :free-Providers
+ * (z.B. Nvidia "ResourceExhausted: Worker local total request limit reached (32/32)",
+ * OpenRouter "temporarily rate-limited upstream", 502/503/504 vom Provider,
+ * Netzwerk-Timeouts). Kurzlebig — ein Retry auf einem anderen Free-Model (=anderer
+ * Provider) klappt i.d.R. sofort. Bewusst NICHT: echte Account-429 (free-per-day/min),
+ * Auth- oder Model-weg-Fehler.
+ */
+function isTransientUpstreamError(error: unknown): boolean {
+  const err = error as
+    | { status?: number; code?: number | string; message?: unknown; error?: { message?: unknown } }
+    | undefined
+  const status = typeof err?.status === "number" ? err.status : typeof err?.code === "number" ? err.code : undefined
+
+  if (status === 500 || status === 502 || status === 503 || status === 504 || status === 529) return true
+
+  // Fehlertext kann je nach LangChain/OpenRouter/SDK unterschiedlich verschachtelt sein
+  // (message, error.message, error.metadata.raw, cause.message …) — alles einsammeln.
+  const e = err as Record<string, any> | undefined
+  const haystack = [
+    e?.message,
+    e?.error?.message,
+    e?.error?.metadata?.raw,
+    e?.metadata?.raw,
+    e?.cause?.message,
+    (() => {
+      try {
+        return JSON.stringify(error)
+      } catch {
+        return ""
+      }
+    })(),
+  ]
+    .filter((s) => typeof s === "string")
+    .join(" ")
+
+  return /ResourceExhausted|Worker local total request limit|resource[_ ]?exhausted|no instances? available|temporarily (rate.?limited|unavailable)|overloaded|at capacity|Upstream error|ECONNRESET|ETIMEDOUT|ECONNREFUSED|network error|fetch failed|socket hang ?up/i.test(
+    haystack,
+  )
+}
+
+/** Hat ein Stream-Chunk sichtbaren Textinhalt? (leere Rollen-/Start-Chunks → false) */
+function chunkHasText(chunk: ChatGenerationChunk): boolean {
+  const text = (chunk as { text?: unknown })?.text
+  if (typeof text === "string" && text.trim().length > 0) return true
+  const content = (chunk as unknown as { message?: { content?: unknown } })?.message?.content
+  if (typeof content === "string" && content.trim().length > 0) return true
+  if (Array.isArray(content)) {
+    return content.some((p) => typeof (p as { text?: unknown })?.text === "string" && (p as { text: string }).text.trim().length > 0)
+  }
+  return false
+}
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
 const MAX_HEALS_PER_CALL = 3
+const MAX_TRANSIENT_HEALS_PER_CALL = 3
+const TRANSIENT_RETRY_BASE_MS = 400
 
 /**
  * ChatOpenAI gegen OpenRouter, festgenagelt auf das beste :free-Model.
@@ -180,9 +244,20 @@ export class FreeOpenRouterLLM extends ChatOpenAI {
     this.freeBaseURL = fields.baseURL
   }
 
+  /** Permanent: Model ist weg/nicht mehr gratis → dauerhaft ausschließen und nächstbestes holen. */
   private async heal(): Promise<void> {
     excludedFreeModels.add(this.model)
     this.model = await fetchBestFreeModel(this.freeBaseURL)
+  }
+
+  /**
+   * Transient: Provider gerade überlastet → NUR für diesen Call auf ein anderes
+   * Free-Model (anderer Provider) wechseln, ohne das gute Model dauerhaft
+   * auszuschließen. Das beste Model wird nach dem Call wiederhergestellt.
+   */
+  private async healTransient(localExcluded: Set<string>): Promise<void> {
+    localExcluded.add(this.model)
+    this.model = await fetchBestFreeModel(this.freeBaseURL, localExcluded)
   }
 
   async _generate(
@@ -191,16 +266,30 @@ export class FreeOpenRouterLLM extends ChatOpenAI {
     runManager?: CallbackManagerForLLMRun
   ): Promise<ChatResult> {
     let heals = 0
-    while (true) {
-      try {
-        return await super._generate(messages, options, runManager)
-      } catch (error) {
-        const limitError = toFreeLimitError(error, this.model)
-        if (limitError) throw limitError
-        if (!isModelGoneError(error) || heals >= MAX_HEALS_PER_CALL) throw error
-        heals++
-        await this.heal()
+    let transientHeals = 0
+    const originalModel = this.model
+    const localExcluded = new Set<string>()
+    try {
+      while (true) {
+        try {
+          return await super._generate(messages, options, runManager)
+        } catch (error) {
+          // Transient zuerst: kann als 429 ODER 5xx kommen — kurz warten, Provider wechseln, erneut.
+          if (isTransientUpstreamError(error) && transientHeals < MAX_TRANSIENT_HEALS_PER_CALL) {
+            transientHeals++
+            await delay(TRANSIENT_RETRY_BASE_MS * transientHeals)
+            await this.healTransient(localExcluded)
+            continue
+          }
+          const limitError = toFreeLimitError(error, this.model)
+          if (limitError) throw limitError
+          if (!isModelGoneError(error) || heals >= MAX_HEALS_PER_CALL) throw error
+          heals++
+          await this.heal()
+        }
       }
+    } finally {
+      this.restoreModel(originalModel)
     }
   }
 
@@ -210,23 +299,45 @@ export class FreeOpenRouterLLM extends ChatOpenAI {
     runManager?: CallbackManagerForLLMRun
   ): AsyncGenerator<ChatGenerationChunk> {
     let heals = 0
-    while (true) {
-      // Nur heilen, solange noch kein Chunk beim Aufrufer ist — danach wäre ein
-      // Neustart des Streams eine stille Duplizierung von Output.
-      let yielded = false
-      try {
-        for await (const chunk of super._streamResponseChunks(messages, options, runManager)) {
-          yielded = true
-          yield chunk
+    let transientHeals = 0
+    const originalModel = this.model
+    const localExcluded = new Set<string>()
+    try {
+      while (true) {
+        // Nur heilen, solange noch kein SICHTBARER Text beim Aufrufer ist. Provider
+        // schicken oft leere Rollen-/Start-Chunks, bevor der Upstream-Fehler kommt —
+        // die dürfen das Heilen NICHT blockieren (sonst rutscht der Fehler durch).
+        // Ein Neustart nach nur leeren Chunks dupliziert keinen sichtbaren Output.
+        let emittedText = false
+        try {
+          for await (const chunk of super._streamResponseChunks(messages, options, runManager)) {
+            if (!emittedText && chunkHasText(chunk)) emittedText = true
+            yield chunk
+          }
+          return
+        } catch (error) {
+          if (!emittedText && isTransientUpstreamError(error) && transientHeals < MAX_TRANSIENT_HEALS_PER_CALL) {
+            transientHeals++
+            await delay(TRANSIENT_RETRY_BASE_MS * transientHeals)
+            await this.healTransient(localExcluded)
+            continue
+          }
+          const limitError = toFreeLimitError(error, this.model)
+          if (limitError) throw limitError
+          if (emittedText || !isModelGoneError(error) || heals >= MAX_HEALS_PER_CALL) throw error
+          heals++
+          await this.heal()
         }
-        return
-      } catch (error) {
-        const limitError = toFreeLimitError(error, this.model)
-        if (limitError) throw limitError
-        if (yielded || !isModelGoneError(error) || heals >= MAX_HEALS_PER_CALL) throw error
-        heals++
-        await this.heal()
       }
+    } finally {
+      this.restoreModel(originalModel)
+    }
+  }
+
+  /** Nach transientem Temp-Wechsel das ursprüngliche (beste) Model wiederherstellen — außer es wurde dauerhaft ausgeschlossen. */
+  private restoreModel(originalModel: string): void {
+    if (this.model !== originalModel && !excludedFreeModels.has(originalModel)) {
+      this.model = originalModel
     }
   }
 }
