@@ -155,10 +155,20 @@ export type LocalModel = AutoComplete<
 // getLLM-Configs (eine pro Provider)
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Laufzeit-Parameter, die 1:1 an das darunterliegende Chat-Model
+ * (`ChatOpenAI` / `ChatGroq`) durchgereicht werden.
+ */
+export type LLMRuntimeConfig = {
+  /** Sampling-Temperatur (analog zum `ChatOpenAI`-Config). */
+  temperature?: number
+}
+
 export type GroqLLMConfig = {
   provider: "chatgroq"
   model?: ChatGroqModel
   apikey?: string
+  config?: LLMRuntimeConfig
 }
 
 type OpenRouterConfigBase = {
@@ -169,6 +179,7 @@ type OpenRouterConfigBase = {
    * `data_collection: "deny"`, `zdr: true` und ohne Fallbacks.
    */
   dataSafe?: boolean
+  config?: LLMRuntimeConfig
 }
 
 export type OpenRouterLLMConfig = OpenRouterConfigBase & {
@@ -189,6 +200,7 @@ export type OpenRouterFreeLLMConfig = OpenRouterConfigBase & {
 export type LocalLLMConfig = {
   provider: "local"
   model?: LocalModel
+  config?: LLMRuntimeConfig
 }
 
 /**

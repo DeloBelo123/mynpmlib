@@ -53,6 +53,7 @@ export function getLLM(config: LLMConfig) {
       const llm: GroqLLM = new ChatGroq({
         apiKey: config.apikey ?? process.env.CHATGROQ_API_KEY,
         model: config.model ?? "llama-3.3-70b-versatile",
+        ...(config.config?.temperature !== undefined ? { temperature: config.config.temperature } : {}),
       });
       llm.provider = "chatgroq"
       return llm
@@ -69,6 +70,7 @@ export function getLLM(config: LLMConfig) {
         },
         model: config.model ?? "openai/gpt-5.4-mini",
         ...(config.dataSafe ? { modelKwargs: OPENROUTER_DATA_SAFE_KWARGS } : {}),
+        ...(config.config?.temperature !== undefined ? { temperature: config.config.temperature } : {}),
       })
       llm.provider = "openrouter"
       return llm
@@ -79,6 +81,7 @@ export function getLLM(config: LLMConfig) {
         model: config.model ?? "nvidia/nemotron-3-nano-4b",
         apiKey: "lm-studio",
         configuration: { baseURL: "http://localhost:1234/v1" },
+        ...(config.config?.temperature !== undefined ? { temperature: config.config.temperature } : {}),
       });
       llm.provider = "local"
       return llm

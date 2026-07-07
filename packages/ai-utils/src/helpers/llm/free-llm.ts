@@ -234,12 +234,14 @@ export class FreeOpenRouterLLM extends ChatOpenAI {
     apiKey?: string
     baseURL: string
     modelKwargs?: Record<string, unknown>
+    temperature?: number
   }) {
     super({
       model: fields.model,
       apiKey: fields.apiKey,
       configuration: { baseURL: fields.baseURL },
       ...(fields.modelKwargs ? { modelKwargs: fields.modelKwargs } : {}),
+      ...(fields.temperature !== undefined ? { temperature: fields.temperature } : {}),
     })
     this.freeBaseURL = fields.baseURL
   }
@@ -346,6 +348,7 @@ export class FreeOpenRouterLLM extends ChatOpenAI {
 export async function getFreeOpenRouterLLM(config: {
   apikey?: string
   dataSafe?: boolean
+  config?: { temperature?: number }
 }): Promise<FreeOpenRouterLLM> {
   const baseURL = config.dataSafe ? OPENROUTER_EU_BASE_URL : OPENROUTER_BASE_URL
   const model = await fetchBestFreeModel(baseURL)
@@ -355,5 +358,6 @@ export async function getFreeOpenRouterLLM(config: {
     apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
     baseURL,
     ...(config.dataSafe ? { modelKwargs: OPENROUTER_DATA_SAFE_KWARGS } : {}),
+    ...(config.config?.temperature !== undefined ? { temperature: config.config.temperature } : {}),
   })
 }
