@@ -162,6 +162,14 @@ export type LocalModel = AutoComplete<
 export type LLMRuntimeConfig = {
   /** Sampling-Temperatur (analog zum `ChatOpenAI`-Config). */
   temperature?: number
+  /**
+   * Nur `openrouter`: schaltet die Reasoning-Ausgabe des Models ein
+   * (`reasoning: { enabled: true }` im Request-Body + `__includeRawResponse`,
+   * damit die Tokens auslesbar werden). Voraussetzung dafür, dass
+   * `.stream({ showReasoning: true })` überhaupt Reasoning-Events liefert —
+   * `showReasoning` allein ist nur der Leser. Nur bei Reasoning-fähigen Models sinnvoll.
+   */
+  reasoning?: boolean
 }
 
 export type GroqLLMConfig = {

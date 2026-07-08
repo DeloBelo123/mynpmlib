@@ -6,6 +6,7 @@ import {
   OPENROUTER_BASE_URL,
   OPENROUTER_EU_BASE_URL,
   OPENROUTER_DATA_SAFE_KWARGS,
+  OPENROUTER_REASONING_KWARGS,
 } from "./free-llm";
 import type {
   LLMConfig,
@@ -63,13 +64,20 @@ export function getLLM(config: LLMConfig) {
       if (config.free) {
         return getFreeOpenRouterLLM(config)
       }
+      // dataSafe (`provider`) und reasoning (`reasoning`) belegen disjunkte Body-Keys → flach mergebar.
+      const modelKwargs = {
+        ...(config.dataSafe ? OPENROUTER_DATA_SAFE_KWARGS : {}),
+        ...(config.config?.reasoning ? OPENROUTER_REASONING_KWARGS : {}),
+      }
       const llm: OpenRouterLLM = new ChatOpenAI({
         apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
         configuration: {
           baseURL: config.dataSafe ? OPENROUTER_EU_BASE_URL : OPENROUTER_BASE_URL,
         },
         model: config.model ?? "openai/gpt-5.4-mini",
-        ...(config.dataSafe ? { modelKwargs: OPENROUTER_DATA_SAFE_KWARGS } : {}),
+        ...(Object.keys(modelKwargs).length > 0 ? { modelKwargs } : {}),
+        // Reasoning-Tokens landen bei OpenRouter in der Roh-Response → nur mit diesem Flag lesbar.
+        ...(config.config?.reasoning ? { __includeRawResponse: true } : {}),
         ...(config.config?.temperature !== undefined ? { temperature: config.config.temperature } : {}),
       })
       llm.provider = "openrouter"

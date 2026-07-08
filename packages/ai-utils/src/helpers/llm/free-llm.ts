@@ -23,6 +23,16 @@ export const OPENROUTER_DATA_SAFE_KWARGS = {
 } as const
 
 /**
+ * Schaltet OpenRouters einheitlichen Reasoning-Modus ein (`reasoning: { enabled: true }`
+ * im Request-Body). ChatOpenAI reicht `modelKwargs` unverändert durch. Damit die
+ * so zurückkommenden `delta.reasoning`-Tokens auch auslesbar sind, muss die Instanz
+ * ZUSÄTZLICH mit `__includeRawResponse: true` gebaut werden (siehe getLLM/getFreeOpenRouterLLM).
+ */
+export const OPENROUTER_REASONING_KWARGS = {
+  reasoning: { enabled: true },
+} as const
+
+/**
  * Models, die zur Laufzeit mit einem "gibt es nicht mehr / nicht mehr gratis"-Error
  * gescheitert sind. Werden bei der Neuauswahl übersprungen (Lebensdauer: Prozess).
  */
@@ -234,6 +244,8 @@ export class FreeOpenRouterLLM extends ChatOpenAI {
     apiKey?: string
     baseURL: string
     modelKwargs?: Record<string, unknown>
+    /** `true` ⇒ ChatOpenAI legt die Roh-Response in `additional_kwargs.__raw_response` ab (nötig fürs Reasoning-Auslesen). */
+    includeRawResponse?: boolean
     temperature?: number
   }) {
     super({
@@ -241,6 +253,7 @@ export class FreeOpenRouterLLM extends ChatOpenAI {
       apiKey: fields.apiKey,
       configuration: { baseURL: fields.baseURL },
       ...(fields.modelKwargs ? { modelKwargs: fields.modelKwargs } : {}),
+      ...(fields.includeRawResponse ? { __includeRawResponse: true } : {}),
       ...(fields.temperature !== undefined ? { temperature: fields.temperature } : {}),
     })
     this.freeBaseURL = fields.baseURL
@@ -348,16 +361,23 @@ export class FreeOpenRouterLLM extends ChatOpenAI {
 export async function getFreeOpenRouterLLM(config: {
   apikey?: string
   dataSafe?: boolean
-  config?: { temperature?: number }
+  config?: { temperature?: number; reasoning?: boolean }
 }): Promise<FreeOpenRouterLLM> {
   const baseURL = config.dataSafe ? OPENROUTER_EU_BASE_URL : OPENROUTER_BASE_URL
   const model = await fetchBestFreeModel(baseURL)
+
+  // dataSafe (`provider`) und reasoning (`reasoning`) belegen disjunkte Body-Keys → flach mergebar.
+  const modelKwargs = {
+    ...(config.dataSafe ? OPENROUTER_DATA_SAFE_KWARGS : {}),
+    ...(config.config?.reasoning ? OPENROUTER_REASONING_KWARGS : {}),
+  }
 
   return new FreeOpenRouterLLM({
     model,
     apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
     baseURL,
-    ...(config.dataSafe ? { modelKwargs: OPENROUTER_DATA_SAFE_KWARGS } : {}),
+    ...(Object.keys(modelKwargs).length > 0 ? { modelKwargs } : {}),
+    ...(config.config?.reasoning ? { includeRawResponse: true } : {}),
     ...(config.config?.temperature !== undefined ? { temperature: config.config.temperature } : {}),
   })
 }
