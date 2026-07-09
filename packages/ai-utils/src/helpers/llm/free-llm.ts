@@ -5,6 +5,7 @@ import {
   type ChatResult,
   type CallbackManagerForLLMRun,
 } from "../../imports"
+import type { ReasoningLevel } from "./types"
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 export const OPENROUTER_EU_BASE_URL = "https://eu.openrouter.ai/api/v1"
@@ -23,14 +24,18 @@ export const OPENROUTER_DATA_SAFE_KWARGS = {
 } as const
 
 /**
- * Schaltet OpenRouters einheitlichen Reasoning-Modus ein (`reasoning: { enabled: true }`
- * im Request-Body). ChatOpenAI reicht `modelKwargs` unverändert durch. Damit die
- * so zurückkommenden `delta.reasoning`-Tokens auch auslesbar sind, muss die Instanz
- * ZUSÄTZLICH mit `__includeRawResponse: true` gebaut werden (siehe getLLM/getFreeOpenRouterLLM).
+ * Baut die OpenRouter-modelKwargs für einen Reasoning-Level: `reasoning: { effort }`
+ * im Request-Body (ChatOpenAI reicht `modelKwargs` unverändert durch). `"none"`/leer
+ * ⇒ `undefined` (kein Reasoning). Damit die zurückkommenden `delta.reasoning`-Tokens
+ * auch auslesbar sind, muss die Instanz ZUSÄTZLICH mit `__includeRawResponse: true`
+ * gebaut werden (siehe getLLM/getFreeOpenRouterLLM).
  */
-export const OPENROUTER_REASONING_KWARGS = {
-  reasoning: { enabled: true },
-} as const
+export function openRouterReasoningKwargs(
+  level?: ReasoningLevel,
+): { reasoning: { effort: ReasoningLevel } } | undefined {
+  if (!level || level === "none") return undefined
+  return { reasoning: { effort: level } }
+}
 
 /**
  * Models, die zur Laufzeit mit einem "gibt es nicht mehr / nicht mehr gratis"-Error
@@ -361,15 +366,16 @@ export class FreeOpenRouterLLM extends ChatOpenAI {
 export async function getFreeOpenRouterLLM(config: {
   apikey?: string
   dataSafe?: boolean
-  config?: { temperature?: number; reasoning?: boolean }
+  config?: { temperature?: number; reasoning?: ReasoningLevel }
 }): Promise<FreeOpenRouterLLM> {
   const baseURL = config.dataSafe ? OPENROUTER_EU_BASE_URL : OPENROUTER_BASE_URL
   const model = await fetchBestFreeModel(baseURL)
 
   // dataSafe (`provider`) und reasoning (`reasoning`) belegen disjunkte Body-Keys → flach mergebar.
+  const reasoningKwargs = openRouterReasoningKwargs(config.config?.reasoning)
   const modelKwargs = {
     ...(config.dataSafe ? OPENROUTER_DATA_SAFE_KWARGS : {}),
-    ...(config.config?.reasoning ? OPENROUTER_REASONING_KWARGS : {}),
+    ...(reasoningKwargs ?? {}),
   }
 
   return new FreeOpenRouterLLM({
@@ -377,7 +383,7 @@ export async function getFreeOpenRouterLLM(config: {
     apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
     baseURL,
     ...(Object.keys(modelKwargs).length > 0 ? { modelKwargs } : {}),
-    ...(config.config?.reasoning ? { includeRawResponse: true } : {}),
+    ...(reasoningKwargs ? { includeRawResponse: true } : {}),
     ...(config.config?.temperature !== undefined ? { temperature: config.config.temperature } : {}),
   })
 }

@@ -159,17 +159,25 @@ export type LocalModel = AutoComplete<
  * Laufzeit-Parameter, die 1:1 an das darunterliegende Chat-Model
  * (`ChatOpenAI` / `ChatGroq`) durchgereicht werden.
  */
+/**
+ * Reasoning-Aufwand eines Models — 1:1 die von OpenRouter/OpenAI akzeptierten
+ * `effort`-Stufen (aufsteigend). `"none"` = kein Reasoning. Nicht jedes Model
+ * unterstützt jede Stufe; nicht unterstützte Stufen ignoriert OpenRouter.
+ */
+export type ReasoningLevel = "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+
 export type LLMRuntimeConfig = {
   /** Sampling-Temperatur (analog zum `ChatOpenAI`-Config). */
   temperature?: number
   /**
-   * Nur `openrouter`: schaltet die Reasoning-Ausgabe des Models ein
-   * (`reasoning: { enabled: true }` im Request-Body + `__includeRawResponse`,
-   * damit die Tokens auslesbar werden). Voraussetzung dafür, dass
-   * `.stream({ showReasoning: true })` überhaupt Reasoning-Events liefert —
-   * `showReasoning` allein ist nur der Leser. Nur bei Reasoning-fähigen Models sinnvoll.
+   * Nur `openrouter`: Reasoning-Aufwand des Models. Default `"none"` = kein
+   * Reasoning (kein Overhead, wie früher `reasoning: false`). Jede andere Stufe
+   * schaltet Reasoning ein (`reasoning: { effort }` im Request-Body +
+   * `__includeRawResponse`, damit die Tokens auslesbar werden) — Voraussetzung
+   * dafür, dass `.stream({ showReasoning: true })` überhaupt Reasoning-Events
+   * liefert. `showReasoning` allein ist nur der Leser.
    */
-  reasoning?: boolean
+  reasoning?: ReasoningLevel
 }
 
 export type GroqLLMConfig = {
