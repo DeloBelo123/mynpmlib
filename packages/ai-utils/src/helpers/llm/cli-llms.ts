@@ -878,7 +878,6 @@ export class OpenAICLI_LLM extends CLI_LLM {
       "exec",
       "--json",
       "--sandbox", "read-only", // keine Datei-Schreibzugriffe
-      "--ask-for-approval", "never", // headless: nie nach Erlaubnis fragen
       "--skip-git-repo-check", // läuft auch im neutralen (Nicht-Git-)cwd
       "-m", this.model,
       ...this.extraArgs,

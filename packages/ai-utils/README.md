@@ -216,8 +216,8 @@ import { Agent, MemorySaver, SmartCheckpointSaver, getLLM } from "@delofarag/ai-
 
 const checkpointer = new SmartCheckpointSaver(new MemorySaver(), {
     llm: getLLM({ provider: "openrouter" }),
-    messagesBeforeSummary: 12,
-    maxSummaries: 7
+    maxTokens: 24_000,
+    keepLastMessages: 4
 })
 
 const agent = new Agent({
@@ -787,23 +787,28 @@ import { MemorySaver, SmartCheckpointSaver, getLLM } from "@delofarag/ai-utils"
 
 const checkpointer = new SmartCheckpointSaver(new MemorySaver(), {
     llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
-    messagesBeforeSummary: 12,
-    maxSummaries: 7
+    maxTokens: 24_000,
+    keepLastMessages: 4
 })
 ```
 
 ### `SmartCheckpointSaver`
 
-- fasst alte Chatverläufe zusammen
-- reduziert Token-Kosten
-- erhält wichtige Fakten über mehrere Sessions
+- konsolidiert alte Verläufe in EINE rollierende Zusammenfassung (System-Message)
+- agentic-tauglich: Tool-Calls + Tool-Results werden mitgezählt, mitsummarized und nie auseinandergerissen (keine orphaned ToolMessages)
+- die letzten `keepLastMessages` User/AI-Messages bleiben wörtlich erhalten
+- Fail-Open: schlägt der Summarizer-LLM fehl, wird der Checkpoint unverändert gespeichert
+- summarized nur am Ende eines abgeschlossenen Turns (nie mitten im Tool-Loop)
 
 Optionen:
 
-- `messagesBeforeSummary` (default `12`)
-- `maxSummaries` (default `7`)
-- `llm` (default OpenRouter `gpt-5.4-mini`)
-- `debug`
+- `maxTokens` (default `24000`) — primärer Trigger: approx. Token-Budget über alle Messages inkl. Tool-Results
+- `messagesBeforeSummary` (default `12`) — sekundärer Trigger: User/AI-Messages seit der letzten Zusammenfassung
+- `keepLastMessages` (default `4`) — Verbatim-Tail, wird auf Tool-Unit-Grenzen ausgerichtet
+- `maxSummaryWords` (default `300`)
+- `maxToolResultChars` (default `3000`) — Tool-Results werden im Summarizer-Input auf diese Länge gekürzt
+- `llm` (default OpenRouter `gpt-5.4-mini`, wird lazy erst beim ersten Summarize erzeugt)
+- `debug` — loggt Token-Stand, Trigger und erstellte Summaries
 
 ### `SupabaseCheckpointSaver`
 

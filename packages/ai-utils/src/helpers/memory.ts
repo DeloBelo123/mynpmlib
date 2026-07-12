@@ -118,16 +118,57 @@ function checkpointToolDisplayName(message: unknown): string | undefined {
     return name || undefined
 }
 
+/** Tool-Calls einer AI-Message — funktioniert mit LangChain-Klassen, serialisierten Objekten und OpenAI-Format in additional_kwargs. */
+export function checkpointToolCalls(message: unknown): Array<{ name?: string, args?: unknown, id?: string }> {
+    if (message === null || message === undefined || typeof message !== "object") return []
+    const raw = message as Record<string, unknown>
+    const kw = raw.kwargs && typeof raw.kwargs === "object" ? (raw.kwargs as Record<string, unknown>) : {}
+
+    const direct = (raw.tool_calls ?? kw.tool_calls) as unknown
+    if (Array.isArray(direct) && direct.length > 0) {
+        return direct.map((tc: Record<string, unknown>) => ({
+            name: typeof tc?.name === "string" ? tc.name : undefined,
+            args: tc?.args,
+            id: typeof tc?.id === "string" ? tc.id : undefined,
+        }))
+    }
+
+    const ak = (raw.additional_kwargs ?? kw.additional_kwargs) as Record<string, unknown> | undefined
+    const akCalls = ak && Array.isArray(ak.tool_calls) ? (ak.tool_calls as Array<Record<string, unknown>>) : []
+    return akCalls.map(tc => {
+        const fn = tc?.function as Record<string, unknown> | undefined
+        return {
+            name: typeof fn?.name === "string" ? fn.name : undefined,
+            args: fn?.arguments,
+            id: typeof tc?.id === "string" ? tc.id : undefined,
+        }
+    })
+}
+
+/** Grobe Token-Schätzung (~4 Zeichen pro Token) über Message-Inhalte inkl. Tool-Calls — keine Tokenizer-Dependency. */
+export function approxCheckpointTokens(messages: unknown[]): number {
+    let chars = 0
+    for (const msg of messages) {
+        chars += checkpointMessageBody(msg).length
+        const toolCalls = checkpointToolCalls(msg)
+        if (toolCalls.length > 0) {
+            try { chars += JSON.stringify(toolCalls).length } catch { chars += 100 }
+        }
+        chars += 20 // Rollen-/Struktur-Overhead pro Message
+    }
+    return Math.ceil(chars / 4)
+}
+
 /**
  * Für Prompts/System-Kontext: klare Labels, Reihenfolge wie im Checkpoint-Channel `messages`,
  * ohne extra DB-Spalte `conversation`.
  */
-export function formatCheckpointMessagesForLLM(messages: unknown[]): string {
+export function formatCheckpointMessagesForLLM(messages: unknown[], maxToolResultChars?: number): string {
     if (!messages.length) return ""
     const blocks: string[] = []
     for (const msg of messages) {
         const role = checkpointMessageRole(msg)
-        const body = checkpointMessageBody(msg).trim()
+        let body = checkpointMessageBody(msg).trim()
 
         let heading: string
         if (role === "human") heading = "**User** (human message)"
@@ -137,6 +178,24 @@ export function formatCheckpointMessagesForLLM(messages: unknown[]): string {
             const toolName = checkpointToolDisplayName(msg)
             heading = toolName ? `**Tool**: \`${toolName}\`` : "**Tool result**"
         } else heading = "**Other / unknown role**"
+
+        if (role === "tool" && maxToolResultChars && body.length > maxToolResultChars) {
+            body = `${body.slice(0, maxToolResultChars)}\n…[gekürzt]`
+        }
+
+        // Tool-Calls einer AI-Message kompakt mit ausgeben, damit der agentic Trace sichtbar bleibt
+        if (role === "ai") {
+            const toolCalls = checkpointToolCalls(msg)
+            if (toolCalls.length > 0) {
+                const callLines = toolCalls.map(tc => {
+                    let args: string
+                    try { args = typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args ?? {}) } catch { args = "…" }
+                    if (args.length > 300) args = `${args.slice(0, 300)}…`
+                    return `→ Tool-Call: \`${tc.name ?? "unknown"}\` mit ${args}`
+                }).join("\n")
+                body = body ? `${body}\n\n${callLines}` : callLines
+            }
+        }
 
         if (!body) continue
         blocks.push(`${heading}\n\n${body}`)
@@ -302,224 +361,216 @@ export class SupabaseCheckpointSaver extends BaseCheckpointSaver {
 }
 
 interface SmartCheckpointSaverOptions {
+    /** Primärer Trigger: approx. Token-Budget über ALLE Messages (inkl. Tool-Results). Default 24000 */
+    maxTokens?: number
+    /** Sekundärer Trigger: Anzahl User/AI Messages seit der letzten Zusammenfassung. Default 12 */
     messagesBeforeSummary?: number
-    maxSummaries?: number
+    /** Verbatim-Tail: so viele der letzten User/AI Messages bleiben wörtlich erhalten (auf Tool-Unit-Grenzen ausgerichtet). Default 4 */
+    keepLastMessages?: number
+    /** Max. Wörter der Zusammenfassung. Default 300 */
+    maxSummaryWords?: number
+    /** Tool-Results werden im Summarizer-Input auf diese Zeichenzahl gekürzt. Default 3000 */
+    maxToolResultChars?: number
+    /** LLM für die Zusammenfassung. Default (lazy): openrouter openai/gpt-5.4-mini */
     llm?: BaseChatModel
     debug?: boolean
 }
+
+const SMART_SUMMARY_FLAG = "__smart_summary"
+const SMART_SUMMARY_PREFIX = "Zusammenfassung der vorherigen Konversation:"
+
 /**
- * CONSTRUCTOR:
- * @example
- * constructor(
-        checkpointSaver: BaseCheckpointSaver,
-        {
-            messagesBeforeSummary = 12,
-            maxSummaries = 7,
-            llm = getLLM({ provider:"openrouter", model: "openai/gpt-5.4-mini"}),
-            debug = false
-        }: SmartCheckpointSaverOptions = {}
-    ) {
-        super()
-        this.checkpointSaver = checkpointSaver
-        this.messagesBeforeSummary = messagesBeforeSummary
-        this.maxSummaries = maxSummaries
-        this.llm = llm
-        this.debug = debug
-    }
+ * Wrapper um einen beliebigen CheckpointSaver, der beim Speichern alte Messages
+ * in EINE rollierende Zusammenfassung konsolidiert (agentic-tauglich: Tool-Calls
+ * und Tool-Results werden mitgezählt, mitsummarized und nie auseinandergerissen).
  */
 export class SmartCheckpointSaver extends BaseCheckpointSaver {
     private checkpointSaver: BaseCheckpointSaver
+    private maxTokens: number
     private messagesBeforeSummary: number
-    private maxSummaries: number
-    private llm: BaseChatModel
+    private keepLastMessages: number
+    private maxSummaryWords: number
+    private maxToolResultChars: number
+    private llm: BaseChatModel | undefined
     private debug: boolean
     private lastDebugState: string | undefined
 
     constructor(
         checkpointSaver: BaseCheckpointSaver,{
+            maxTokens = 24_000,
             messagesBeforeSummary = 12,
-            maxSummaries = 7,
-            llm = getLLM({ provider:"openrouter", model: "openai/gpt-5.4-mini"}),
+            keepLastMessages = 4,
+            maxSummaryWords = 300,
+            maxToolResultChars = 3000,
+            llm,
             debug = false
         }: SmartCheckpointSaverOptions = {}
     ) {
         super()
         this.checkpointSaver = checkpointSaver
+        this.maxTokens = maxTokens
         this.messagesBeforeSummary = messagesBeforeSummary
-        this.maxSummaries = maxSummaries
+        this.keepLastMessages = keepLastMessages
+        this.maxSummaryWords = maxSummaryWords
+        this.maxToolResultChars = maxToolResultChars
         this.llm = llm
         this.debug = debug
     }
-    
-    private getMessageRole(message: BaseMessage): "human" | "ai" | "system" | "other" {
-        const r = checkpointMessageRole(message)
-        if (r === "tool" || r === "other") return "other"
-        return r
+
+    /** Default-LLM lazy erzeugen — so ist kein OPENROUTER_API_KEY nötig, solange nie summarized wird oder ein eigenes LLM übergeben wurde. */
+    private getSummaryLLM(): BaseChatModel {
+        if (!this.llm) {
+            this.llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" })
+        }
+        return this.llm
     }
 
-    private getMessageContent(message: BaseMessage): string {
-        return checkpointMessageBody(message)
+    /** Erkennt die Summary-System-Message über das additional_kwargs-Flag; Fallback auf den Text-Prefix für alte persistierte Threads. */
+    private isSummaryMessage(message: BaseMessage): boolean {
+        if (checkpointMessageRole(message) !== "system") return false
+        const raw = message as unknown as Record<string, unknown>
+        const kw = raw.kwargs && typeof raw.kwargs === "object" ? (raw.kwargs as Record<string, unknown>) : {}
+        const ak = (raw.additional_kwargs ?? kw.additional_kwargs) as Record<string, unknown> | undefined
+        if (ak && typeof ak === "object" && ak[SMART_SUMMARY_FLAG]) return true
+        return checkpointMessageBody(message).startsWith(SMART_SUMMARY_PREFIX)
     }
 
-    /**
-     * Zählt User/AI Messages (ignoriert System-Messages)
-     */
     private countChatMessages(messages: BaseMessage[]): number {
         return messages.filter(msg => {
-            const role = this.getMessageRole(msg)
+            const role = checkpointMessageRole(msg)
             return role === "human" || role === "ai"
         }).length
     }
-    
+
     /**
-     * Findet alle System-Messages die Zusammenfassungen sind
+     * Gruppiert Messages in atomare Units: eine AI-Message mit tool_calls bildet mit
+     * allen direkt folgenden Tool-Messages EINE Unit. Schnitte passieren nur an
+     * Unit-Grenzen — orphaned Tool-Messages sind damit strukturell unmöglich.
      */
-    private findSummaryMessages(messages: BaseMessage[]): Array<{ index: number, message: BaseMessage }> {
-        const summaries: Array<{ index: number, message: BaseMessage }> = []
-        messages.forEach((msg, index) => {
-            if (this.getMessageRole(msg) === "system" && this.getMessageContent(msg).includes("Zusammenfassung")) {
-                summaries.push({ index, message: msg })
+    private groupIntoUnits(messages: BaseMessage[]): BaseMessage[][] {
+        const units: BaseMessage[][] = []
+        let i = 0
+        while (i < messages.length) {
+            const msg = messages[i]
+            const role = checkpointMessageRole(msg)
+            if (role === "ai" && checkpointToolCalls(msg).length > 0) {
+                const unit: BaseMessage[] = [msg]
+                let j = i + 1
+                while (j < messages.length && checkpointMessageRole(messages[j]) === "tool") {
+                    unit.push(messages[j])
+                    j++
+                }
+                units.push(unit)
+                i = j
+            } else {
+                units.push([msg])
+                i++
             }
-        })
-        return summaries
+        }
+        return units
     }
-    
-    /**
-     * Konvertiert Messages zu Text für Summarization
-     */
-    private messagesToText(messages: BaseMessage[]): string {
-        return messages.map(msg => {
-            const role = this.getMessageRole(msg)
-            const label = role === "human" ? "User" : role === "ai" ? "Assistant" : "System"
-            return `${label}: ${this.getMessageContent(msg)}`
-        }).join('\n\n')
-    }
-    
+
 
     private async applySmartSummarization(checkpoint: Checkpoint): Promise<Checkpoint> {
-        // Guard: Wenn checkpoint undefined ist, gib ihn zurück
         if (!checkpoint) {
             return checkpoint
         }
-        
-        // Messages sind in channel_values gespeichert
+
         const channelValues = checkpoint.channel_values || {}
         const messages = (channelValues.messages as BaseMessage[]) || []
-        
-        // Finde alle Zusammenfassungs-System-Messages
-        const summaryMessages = this.findSummaryMessages(messages)
-        
-        // Finde den Index der letzten Zusammenfassung (falls vorhanden)
-        const lastSummaryIndex = summaryMessages.length > 0 
-            ? summaryMessages[summaryMessages.length - 1].index 
-            : -1
-        
-        // Finde die Messages NACH der letzten Zusammenfassung
-        const messagesAfterLastSummary = messages.slice(lastSummaryIndex + 1)
-        const chatMessagesAfterLastSummary = messagesAfterLastSummary.filter(msg => {
-            const role = this.getMessageRole(msg)
-            return role === "human" || role === "ai"
-        })
-        const lastChatMessageRole = chatMessagesAfterLastSummary.length > 0
-            ? this.getMessageRole(chatMessagesAfterLastSummary[chatMessagesAfterLastSummary.length - 1])
-            : "other"
-        
-        // Zähle nur User/AI Messages NACH der letzten Zusammenfassung
-        const chatMessageCount = chatMessagesAfterLastSummary.length
+        if (messages.length === 0) {
+            return checkpoint
+        }
+
+        // Nur am Ende eines abgeschlossenen Turns summarizen: letzte Message muss eine
+        // AI-Antwort OHNE pending tool_calls sein (sonst sind wir mitten im Tool-Loop)
+        const lastMessage = messages[messages.length - 1]
+        if (checkpointMessageRole(lastMessage) !== "ai" || checkpointToolCalls(lastMessage).length > 0) {
+            return checkpoint
+        }
+
+        // Führende System-Messages (z.B. Agent-Systemprompt) bleiben immer unangetastet
+        let headEnd = 0
+        while (
+            headEnd < messages.length &&
+            checkpointMessageRole(messages[headEnd]) === "system" &&
+            !this.isSummaryMessage(messages[headEnd])
+        ) {
+            headEnd++
+        }
+        const head = messages.slice(0, headEnd)
+
+        // Bisherige Summary-Messages rausziehen — sie werden in die neue, konsolidierte Summary eingespeist
+        const previousSummaries = messages.slice(headEnd).filter(msg => this.isSummaryMessage(msg))
+        const rest = messages.slice(headEnd).filter(msg => !this.isSummaryMessage(msg))
+
+        // Trigger: Token-Budget überschritten ODER genug Chat-Messages seit der letzten Summary
+        const totalTokens = approxCheckpointTokens(messages)
+        const chatMessageCount = this.countChatMessages(rest)
+        const shouldSummarize = totalTokens > this.maxTokens || chatMessageCount >= this.messagesBeforeSummary
+
         if (this.debug) {
-            const missingUntilNextSummary = Math.max(0, this.messagesBeforeSummary - chatMessageCount)
-            const debugState = `${summaryMessages.length}:${chatMessageCount}:${missingUntilNextSummary}:${lastChatMessageRole}`
+            const debugState = `${previousSummaries.length}:${chatMessageCount}:${totalTokens}:${shouldSummarize}`
             if (debugState !== this.lastDebugState) {
-                console.log(`[SmartCheckpointSaver] Chat messages since last summary: ${chatMessageCount}`)
-                console.log(`[SmartCheckpointSaver] Messages until next summary: ${missingUntilNextSummary}`)
+                console.log(`[SmartCheckpointSaver] ~${totalTokens} tokens, ${chatMessageCount} chat messages since last summary (trigger: >${this.maxTokens} tokens or >=${this.messagesBeforeSummary} messages)`)
                 this.lastDebugState = debugState
             }
         }
-        
-        // Wenn noch nicht genug Messages nach der letzten Zusammenfassung, keine Summarization
-        if (chatMessageCount < this.messagesBeforeSummary || lastChatMessageRole !== "ai") {
+
+        if (!shouldSummarize) {
             return checkpoint
         }
-        
-        // Finde die Indizes der letzten X User/AI Messages NACH der letzten Zusammenfassung die zusammengefasst werden sollen
-        const indicesToSummarize: number[] = []
-        const messagesToSummarize: BaseMessage[] = []
-        let chatCount = 0
-        
-        // Gehe rückwärts durch Messages NACH der letzten Zusammenfassung
-        for (let i = messagesAfterLastSummary.length - 1; i >= 0 && chatCount < this.messagesBeforeSummary; i--) {
-            const msg = messagesAfterLastSummary[i]
-            const role = this.getMessageRole(msg)
-            if (role === "human" || role === "ai") {
-                const originalIndex = lastSummaryIndex + 1 + i // Original-Index im messages Array
-                indicesToSummarize.unshift(originalIndex) // Am Anfang einfügen für korrekte Reihenfolge
-                messagesToSummarize.unshift(msg) // Am Anfang einfügen für korrekte Reihenfolge
-                chatCount++
-            }
+
+        // Auswahl an Unit-Grenzen: die letzten keepLastMessages Chat-Messages bleiben
+        // wörtlich erhalten, alles Ältere wird zusammengefasst
+        const units = this.groupIntoUnits(rest)
+        let cutIndex = units.length
+        let keptChat = 0
+        while (cutIndex > 0 && keptChat < this.keepLastMessages) {
+            cutIndex--
+            keptChat += this.countChatMessages(units[cutIndex])
         }
-        
+        const unitsToSummarize = units.slice(0, cutIndex)
+        const messagesToSummarize = unitsToSummarize.flat()
         if (messagesToSummarize.length === 0) {
             return checkpoint
         }
-        
-        // Erstelle Zusammenfassung
-        const conversationText = this.messagesToText(messagesToSummarize)
-        const summary = await chatSummarizer({
-            conversation: conversationText,
-            llm: this.llm,
-            maxWords: 150
-        })
-        if (this.debug) {
-            console.log(`Summary erstellt beim SmartCheckpointSaver: ${summary}`)
-        }
-        
-        // Erstelle neue System-Message mit Zusammenfassung
-        const summarySystemMessage = new SystemMessage(
-            `Zusammenfassung der vorherigen Konversation:\n${summary}`
-        )
-        
-        // Entferne die Messages die zusammengefasst wurden (verwende Indizes)
-        const remainingMessages = messages.filter((_: BaseMessage, index: number) => 
-            !indicesToSummarize.includes(index)
-        )
-        
-        // Finde die Position der letzten Zusammenfassung im remainingMessages Array
-        // (Die Indizes haben sich verschoben, aber die letzte Zusammenfassung sollte noch da sein)
-        const remainingSummaryMessages = this.findSummaryMessages(remainingMessages)
-        const lastSummaryIndexInRemaining = remainingSummaryMessages.length > 0 
-            ? remainingSummaryMessages[remainingSummaryMessages.length - 1].index 
-            : -1
-        
-        // Füge Zusammenfassung direkt nach der letzten Zusammenfassung ein
-        // Wenn keine Zusammenfassung vorhanden, füge am Anfang ein (nach System-Messages)
-        let newMessages: BaseMessage[]
-        if (lastSummaryIndexInRemaining >= 0) {
-            const beforeSummary = remainingMessages.slice(0, lastSummaryIndexInRemaining + 1)
-            const afterSummary = remainingMessages.slice(lastSummaryIndexInRemaining + 1)
-            newMessages = [...beforeSummary, summarySystemMessage, ...afterSummary]
-        } else {
-            // Keine Zusammenfassung vorhanden: Füge nach System-Messages ein
-            const systemMessages = remainingMessages.filter((msg: BaseMessage) => this.getMessageRole(msg) === "system")
-            const nonSystemMessages = remainingMessages.filter((msg: BaseMessage) => this.getMessageRole(msg) !== "system")
-            newMessages = [...systemMessages, summarySystemMessage, ...nonSystemMessages]
-        }
-        
-        // Prüfe ob zu viele Zusammenfassungen vorhanden sind
-        const allSummaries = this.findSummaryMessages(newMessages)
-        if (allSummaries.length > this.maxSummaries) {
-            // Entferne die älteste Zusammenfassung
-            const oldestSummary = allSummaries[0]
-            const finalMessages = newMessages.filter((_: BaseMessage, index: number) => index !== oldestSummary.index)
-            
-            return {
-                ...checkpoint,
-                channel_values: {
-                    ...channelValues,
-                    messages: finalMessages
-                }
+
+        // Summarizer-Input: bisherige Summary + neuer Verlauf inkl. Tool-Calls/-Results (gekürzt)
+        const conversationText = formatCheckpointMessagesForLLM(messagesToSummarize, this.maxToolResultChars)
+        const previousSummaryText = previousSummaries.map(msg => checkpointMessageBody(msg)).join("\n\n")
+        const summarizerInput = previousSummaryText
+            ? `Bisherige Zusammenfassung:\n${previousSummaryText}\n\n---\n\nNeuer Verlauf:\n${conversationText}`
+            : conversationText
+
+        // Fail-Open: ein Summarizer-Fehler darf nie den Agent-Run killen — dann unsummarized speichern
+        let summary: string
+        try {
+            summary = await chatSummarizer({
+                conversation: summarizerInput,
+                llm: this.getSummaryLLM(),
+                maxWords: this.maxSummaryWords
+            })
+        } catch (error) {
+            if (this.debug) {
+                console.warn(`[SmartCheckpointSaver] Summarization failed, saving checkpoint unsummarized:`, error)
             }
+            return checkpoint
         }
-        
+
+        const summarySystemMessage = new SystemMessage({
+            content: `${SMART_SUMMARY_PREFIX}\n${summary}`,
+            additional_kwargs: { [SMART_SUMMARY_FLAG]: true }
+        })
+
+        const newMessages = [...head, summarySystemMessage, ...units.slice(cutIndex).flat()]
+
+        if (this.debug) {
+            const tokensAfter = approxCheckpointTokens(newMessages)
+            console.log(`[SmartCheckpointSaver] Summarized ${unitsToSummarize.length} units (${messagesToSummarize.length} messages): ~${totalTokens} -> ~${tokensAfter} tokens`)
+            console.log(`[SmartCheckpointSaver] Summary: ${summary}`)
+        }
+
         return {
             ...checkpoint,
             channel_values: {
@@ -573,7 +624,8 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
 }
 
 /**
- * fasst eine Chat-Konversation zwischen User und Assistant zusammen
+ * Fasst einen Konversations-Verlauf zusammen — agentic-tauglich: Tool-Calls und deren
+ * Ergebnisse werden mitverdichtet, damit ein Agent mit reduziertem Kontext nahtlos weiterarbeiten kann.
  */
 export async function chatSummarizer({
     conversation,
@@ -586,22 +638,27 @@ export async function chatSummarizer({
     llm: BaseChatModel,
     maxWords?: number
 }): Promise<string> {
-    const focusMessage: Array<["system", string]> = fokuss 
+    const focusMessage: Array<["system", string]> = fokuss
         ? [["system", `Fokussiere dich besonders auf die folgenden Themen:\n${fokuss}`]]
         : []
-    
+
     const prompt = ChatPromptTemplate.fromMessages([
-        ["system", `Du fasst eine Chat-Konversation zwischen User und Assistant zusammen.
+        ["system", `Du fasst den bisherigen Verlauf einer Konversation zwischen User und einem AI-Assistant/-Agent zusammen (inklusive eventueller Tool-Aufrufe und deren Ergebnisse). Die Zusammenfassung ersetzt den Verlauf im Kontext — der Assistant muss damit nahtlos weiterarbeiten können.
+          Die Zusammenfassung MUSS enthalten (soweit im Verlauf vorhanden):
+          1. Ziel/Auftrag des Users
+          2. Alle wichtigen Fakten: Namen, Zahlen, IDs, Präferenzen, Entscheidungen, Vereinbarungen
+          3. Ausgeführte Aktionen: welche Tools mit welchem Kern-Input aufgerufen wurden und was das Ergebnis war (kompakt, 1 Zeile pro Aktion)
+          4. Aktueller Stand und offene Punkte / nächste Schritte
+          5. Constraints und Vereinbarungen, die weiterhin gelten
           WICHTIG:
-          - Behalte ALLE wichtigen Fakten: Namen, Präferenzen, Entscheidungen, Vereinbarungen
+          - Falls eine "Bisherige Zusammenfassung" mitgegeben wird: konsolidiere sie mit dem neuen Verlauf zu EINER Zusammenfassung. Ältere Infos nur weglassen, wenn sie erledigt oder irrelevant geworden sind
           - Behalte chronologischen Kontext wo relevant für Verständnis
           - Fasse auf max. ${maxWords} Wörter zusammen
-          - Format: Kurze, prägnante Zusammenfassung ohne Bullet-Points
           - Ignoriere Small-Talk, fokussiere auf inhaltliche Punkte`],
         ...focusMessage,
         ["human", "{conversation}"]
     ])
-    
+
     const chain = createSimpleChain(prompt, llm, new StringOutputParser())
     const result = await chain.invoke({ conversation })
     return typeof result === "string" ? result : String(result)

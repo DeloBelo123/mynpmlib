@@ -27,8 +27,8 @@ Kurzreferenz für Entwicklung und AI-Assistenten in `@delofarag/ai-utils`.
 import { Agent, MemorySaver, SmartCheckpointSaver, getLLM } from "@delofarag/ai-utils"
 
 const checkpointer = new SmartCheckpointSaver(new MemorySaver(), {
-    messagesBeforeSummary: 12,
-    maxSummaries: 7,
+    maxTokens: 24_000,
+    keepLastMessages: 4,
     llm: getLLM({ provider: "openrouter" }),
 })
 
