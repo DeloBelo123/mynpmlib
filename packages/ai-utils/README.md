@@ -847,11 +847,35 @@ import {
 ### Vector Stores
 
 - `createRAMVectoreStore(data)`
-- `createSupabaseVectoreStore(data, config?)`
-- `getSupabaseVectorStore(config?)`
+- `createSupabaseVectoreStore(data, config?)` — akzeptiert Strings, LangChain-`Document`s und `{ pageContent, metadata }`; `config.embeddings` überschreibt den Ollama-Default
+- `getSupabaseVectorStore(config?)` — öffnet einen bestehenden Store mit optionalen `embeddings`, `filter` und `upsertBatchSize`
 - `createFaissStore(data, config?)`
 - `loadFaissStore({ path })`
 - `turn_to_docs(data)`
+
+Mandantensichere Supabase-Ingestion mit eigenen Embeddings und erhaltenen Metadaten:
+
+```ts
+import { OpenAIEmbeddings } from "@langchain/openai"
+import { createSupabaseVectoreStore } from "@delofarag/ai-utils"
+
+const embeddings = new OpenAIEmbeddings({
+    apiKey: process.env.OPENROUTER_API_KEY,
+    model: "openai/text-embedding-3-small",
+    configuration: { baseURL: "https://openrouter.ai/api/v1" },
+})
+
+await createSupabaseVectoreStore([
+    {
+        pageContent: "Die Frühschicht beginnt um 6 Uhr.",
+        metadata: { company_id: "company-1", job_id: "job-1" },
+    },
+], {
+    embeddings,
+    table_name: "mira_knowledge_chunks",
+    RPC_function: "match_mira_knowledge",
+})
+```
 
 ### RAG Chain
 
@@ -859,7 +883,7 @@ import {
 
 ### RAG Tool
 
-- `createRAGTool({ vectorStore, name, description })`
+- `createRAGTool({ vectorStore, name, description, k?, filter? })`
 
 ```ts
 import { createRAGTool, createFaissStore } from "@delofarag/ai-utils"
@@ -868,9 +892,14 @@ const vectorStore = await createFaissStore(["FAQ 1", "FAQ 2"])
 const ragTool = createRAGTool({
     vectorStore,
     name: "search_faq",
-    description: "Sucht in FAQ-Dokumenten"
+    description: "Sucht in FAQ-Dokumenten",
+    k: 6,
+    filter: { company_id: "company-1", job_id: "job-1" },
 })
 ```
+
+`filter` wird unverändert als drittes Argument an `vectorStore.similaritySearch()` gereicht.
+Bei `SupabaseVectorStore` landet das Objekt im `filter`-Parameter der konfigurierten RPC.
 
 ---
 

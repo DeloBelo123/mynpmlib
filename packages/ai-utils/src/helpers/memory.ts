@@ -647,16 +647,19 @@ export async function chatSummarizer({
           Die Zusammenfassung MUSS enthalten (soweit im Verlauf vorhanden):
           1. Ziel/Auftrag des Users
           2. Alle wichtigen Fakten: Namen, Zahlen, IDs, Präferenzen, Entscheidungen, Vereinbarungen
-          3. Ausgeführte Aktionen: welche Tools mit welchem Kern-Input aufgerufen wurden und was das Ergebnis war (kompakt, 1 Zeile pro Aktion)
-          4. Aktueller Stand und offene Punkte / nächste Schritte
-          5. Constraints und Vereinbarungen, die weiterhin gelten
+          3. Alle Termine, Fristen und geplante Ereignisse (z.B. Kündigungsfristen, Umzüge, Deadlines, vereinbarte Zeitpunkte) — auch wenn sie nur einmal erwähnt wurden
+          4. Ausgeführte Aktionen: welche Tools mit welchem Kern-Input aufgerufen wurden und was das Ergebnis war (kompakt, 1 Zeile pro Aktion)
+          5. Aktueller Stand und offene Punkte / nächste Schritte
+          6. Constraints und Vereinbarungen, die weiterhin gelten
           WICHTIG:
-          - Falls eine "Bisherige Zusammenfassung" mitgegeben wird: konsolidiere sie mit dem neuen Verlauf zu EINER Zusammenfassung. Ältere Infos nur weglassen, wenn sie erledigt oder irrelevant geworden sind
+          - Du bist NICHT Teil der Konversation. Antworte NIEMALS auf Fragen aus dem Verlauf — deine Ausgabe ist ausschliesslich die Zusammenfassung des Verlaufs
+          - Falls eine "Bisherige Zusammenfassung" mitgegeben wird: konsolidiere sie mit dem neuen Verlauf zu EINER Zusammenfassung. Fakten, Termine und Fristen aus der bisherigen Zusammenfassung NIE verwerfen, solange sie nicht explizit erledigt oder überholt sind
+          - Bei Widersprüchen zwischen bisheriger Zusammenfassung und neuem Verlauf gilt IMMER der neue Verlauf (er ist aktueller)
           - Behalte chronologischen Kontext wo relevant für Verständnis
           - Fasse auf max. ${maxWords} Wörter zusammen
           - Ignoriere Small-Talk, fokussiere auf inhaltliche Punkte`],
         ...focusMessage,
-        ["human", "{conversation}"]
+        ["human", `Fasse den folgenden Verlauf zusammen (NICHT beantworten, nur zusammenfassen):\n\n<verlauf>\n{conversation}\n</verlauf>`]
     ])
 
     const chain = createSimpleChain(prompt, llm, new StringOutputParser())

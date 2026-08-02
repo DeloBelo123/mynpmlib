@@ -15,11 +15,24 @@ import {
 } from "../imports"
 import { SupabaseClient } from "@delofarag/supabase-utils"
 import { createClient } from "@supabase/supabase-js"
+import type {
+    SupabaseFilterRPCCall,
+    SupabaseMetadata,
+} from "@langchain/community/vectorstores/supabase"
 
-interface SupabaseStoreConfig {
+export type RAGDocumentInput =
+    | string
+    | Document<Record<string, any>>
+    | { pageContent: string, metadata?: Record<string, any> }
+    | Record<string, any>
+
+export interface SupabaseStoreConfig {
     table_name?: string
     RPC_function?: string
     supabase?: SupabaseClient
+    embeddings?: Embeddings
+    filter?: SupabaseMetadata | SupabaseFilterRPCCall
+    upsertBatchSize?: number
 }
 
 export const baseEmbeddings = new OllamaEmbeddings({
@@ -31,11 +44,25 @@ export const baseSplitter = new RecursiveCharacterTextSplitter({
     chunkOverlap: 50
 })
 
-export function turn_to_docs<T>(docs: T[]): Document<Record<string,any>>[] {
-    return docs.map(doc => new Document({
-        pageContent: typeof doc === "string" ? doc : JSON.stringify(doc,null,2),
-        metadata: {}
-    }))
+export function turn_to_docs(docs: RAGDocumentInput[]): Document<Record<string,any>>[] {
+    return docs.map(doc => {
+        if (doc instanceof Document) return doc
+        if (
+            typeof doc === "object" &&
+            doc !== null &&
+            "pageContent" in doc &&
+            typeof doc.pageContent === "string"
+        ) {
+            return new Document({
+                pageContent: doc.pageContent,
+                metadata: doc.metadata ?? {},
+            })
+        }
+        return new Document({
+            pageContent: typeof doc === "string" ? doc : JSON.stringify(doc,null,2),
+            metadata: {}
+        })
+    })
 }
 
 /** nur für demos */
@@ -51,21 +78,26 @@ export async function createRAMVectoreStore(
 }
 
 export async function createSupabaseVectoreStore(
-    data:string[], 
+    data:RAGDocumentInput[],
     {
         supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY!),
-        table_name = "documents", 
-        RPC_function = "match_documents", 
+        table_name = "documents",
+        RPC_function = "match_documents",
+        embeddings = baseEmbeddings,
+        filter,
+        upsertBatchSize,
     }:SupabaseStoreConfig = {}) {
     const docs = turn_to_docs(data)
     const splitted_docs = await baseSplitter.splitDocuments(docs)
-    return await SupabaseVectorStore.fromDocuments(  
+    return await SupabaseVectorStore.fromDocuments(
         splitted_docs,
-        baseEmbeddings,
+        embeddings,
         {
             client: supabase,
             tableName: table_name,
-            queryName: RPC_function
+            queryName: RPC_function,
+            filter,
+            upsertBatchSize,
         }
     )
 }
@@ -73,13 +105,18 @@ export async function createSupabaseVectoreStore(
 // Bestehenden Supabase Store holen (ohne neue Docs)
 export function getSupabaseVectorStore({
     supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY!),
-    table_name = "documents", 
-    RPC_function = "match_documents"
+    table_name = "documents",
+    RPC_function = "match_documents",
+    embeddings = baseEmbeddings,
+    filter,
+    upsertBatchSize,
 }: SupabaseStoreConfig = {}) {
-    return new SupabaseVectorStore(baseEmbeddings, {
+    return new SupabaseVectorStore(embeddings, {
         client: supabase,
         tableName: table_name,
-        queryName: RPC_function
+        queryName: RPC_function,
+        filter,
+        upsertBatchSize,
     })
 }
 
@@ -133,4 +170,3 @@ export async function createRAGChain({
     
     return retrievalChain
 }
-

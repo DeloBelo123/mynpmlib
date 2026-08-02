@@ -90,7 +90,7 @@ await deepAgent.invoke({ input: "Analysiere das Projekt.", thread_id: "u1" })
 - Provider: `openrouter`
 - Model: `openai/gpt-5.4-mini`
 - Zod: `zod/v4`
-- Embeddings (RAG): Ollama `nomic-embed-text`
+- Embeddings (RAG): Ollama `nomic-embed-text` als rückwärtskompatibler Default; für Produktion über `embeddings` injizieren
 
 ## Wichtige Env-Vars
 
