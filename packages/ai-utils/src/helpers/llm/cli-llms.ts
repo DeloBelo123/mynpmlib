@@ -270,18 +270,61 @@ function extractJsonObject(text: string): unknown {
 
 type ToolDecision = { kind: "tool_call"; calls: ToolCallLike[] } | { kind: "final"; text: string }
 
+/**
+ * Marker, mit dem eine Tool-Antwort beginnen MUSS. Alles ohne diesen Präfix ist
+ * finale Prosa — dadurch bleibt der Normalfall streambar (siehe `sniffToolHead`).
+ */
+const TOOL_CALL_PREFIX = "TOOL_CALL"
+
+/** Baut aus `{name, arguments}` bzw. `{tool_call:{…}}` einen `ToolCallLike`. */
+function toToolCall(obj: unknown): ToolCallLike | undefined {
+  if (!obj || typeof obj !== "object") return undefined
+  const outer = obj as { tool_call?: unknown; name?: unknown; arguments?: unknown; args?: unknown }
+  const inner = (outer.tool_call ?? outer) as { name?: unknown; arguments?: unknown; args?: unknown }
+  if (typeof inner.name !== "string") return undefined
+  const rawArgs = inner.arguments ?? inner.args
+  const args =
+    typeof rawArgs === "string"
+      ? ((safeJson(rawArgs) as Record<string, unknown>) ?? {})
+      : ((rawArgs as Record<string, unknown>) ?? {})
+  return { name: inner.name, args, id: nextToolCallId(inner.name), type: "tool_call" }
+}
+
+type HeadVerdict = "tool" | "prose" | "pending"
+
+/**
+ * Entscheidet am Anfang eines Streams, ob ein Tool-Aufruf kommt (→ puffern) oder
+ * Prosa (→ direkt durchreichen). `pending`, solange die Ausgabe noch ein Präfix
+ * des Markers sein könnte.
+ */
+function sniffToolHead(raw: string): HeadVerdict {
+  const s = raw.replace(/^\s+/, "")
+  if (!s) return "pending"
+  // Rohes JSON oder Code-Fence → altes Protokoll; sicherheitshalber puffern.
+  if (s[0] === "{" || s[0] === "`") return "tool"
+  if (s.length < TOOL_CALL_PREFIX.length) {
+    return TOOL_CALL_PREFIX.startsWith(s) ? "pending" : "prose"
+  }
+  return s.startsWith(TOOL_CALL_PREFIX) ? "tool" : "prose"
+}
+
 /** Interpretiert die Model-Ausgabe als Tool-Aufruf oder finale Antwort. */
 function parseToolDecision(text: string): ToolDecision {
+  const trimmed = text.replace(/^\s+/, "")
+
+  // Neues Protokoll: `TOOL_CALL {"name": …, "arguments": {…}}`
+  if (trimmed.startsWith(TOOL_CALL_PREFIX)) {
+    const call = toToolCall(extractJsonObject(trimmed.slice(TOOL_CALL_PREFIX.length)))
+    if (call) return { kind: "tool_call", calls: [call] }
+    return { kind: "final", text }
+  }
+
+  // Altes Protokoll (`{"tool_call": …}` / `{"final": …}`) — Modelle, die den Marker ignorieren.
   const obj = extractJsonObject(text)
   if (obj && typeof obj === "object") {
-    const tc = (obj as { tool_call?: { name?: unknown; arguments?: unknown } }).tool_call
-    if (tc && typeof tc.name === "string") {
-      const rawArgs = tc.arguments
-      const args =
-        typeof rawArgs === "string"
-          ? ((safeJson(rawArgs) as Record<string, unknown>) ?? {})
-          : ((rawArgs as Record<string, unknown>) ?? {})
-      return { kind: "tool_call", calls: [{ name: tc.name, args, id: nextToolCallId(tc.name), type: "tool_call" }] }
+    if ((obj as { tool_call?: unknown }).tool_call !== undefined) {
+      const call = toToolCall(obj)
+      if (call) return { kind: "tool_call", calls: [call] }
     }
     const final = (obj as { final?: unknown }).final
     if (typeof final === "string") return { kind: "final", text: final }
@@ -329,9 +372,18 @@ interface CLIDefaults {
   provider: string
 }
 
+/**
+ * Reasoning-Aufwand. Welche Stufen ein Modell wirklich kennt, ist provider- und
+ * modellabhängig (Claude: low–max; OpenAI je Modell, teils bis `ultra`) — die CLI
+ * validiert selbst und fällt bei Unbekanntem auf ihren Default zurück.
+ */
+export type CLIEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+
 export interface CLILLMParams extends BaseChatModelParams {
   /** Model-Name, der per `--model`/`-m` an die CLI gereicht wird. */
   model?: string
+  /** Reasoning-Aufwand; wird provider-spezifisch auf das jeweilige CLI-Flag abgebildet. */
+  effort?: CLIEffort
   /** System-Prompt. Default `""` → ersetzt den Default-(Coding-)Systemprompt der CLI. */
   systemPrompt?: string
   /** Arbeitsverzeichnis des Subprozesses. Default: neutrales Temp-Verzeichnis. */
@@ -352,6 +404,7 @@ export interface CLILLMParams extends BaseChatModelParams {
  */
 export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
   model: string
+  effort?: CLIEffort
   systemPrompt: string
   cwd: string
   cliPath: string
@@ -382,6 +435,7 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
     super(fields)
     this.provider = defaults.provider
     this.model = fields.model ?? defaults.model
+    this.effort = fields.effort
     this.systemPrompt = fields.systemPrompt ?? ""
     this.cwd = fields.cwd ?? neutralCwd()
     this.cliPath = fields.cliPath ?? defaults.cliPath
@@ -421,9 +475,10 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
       list,
       "",
       "Wenn ein Tool die Anfrage beantworten hilft, rufe es auf. Beziehe dich bei Bedarf auf frühere Tool-Ergebnisse im Verlauf.",
-      "Antworte AUSSCHLIESSLICH mit GENAU EINEM JSON-Objekt — kein weiterer Text, keine Markdown-Codeblöcke:",
-      '- Tool aufrufen: {"tool_call": {"name": "<toolname>", "arguments": { ... }}}',
-      '- Endgültige Antwort an den Nutzer: {"final": "<deine Antwort>"}',
+      `Um ein Tool aufzurufen, MUSS deine Antwort mit genau dieser Zeile beginnen und sonst nichts enthalten — kein Vortext, keine Markdown-Codeblöcke:`,
+      `${TOOL_CALL_PREFIX} {"name": "<toolname>", "arguments": { ... }}`,
+      "",
+      "Willst du kein Tool aufrufen, antworte ganz normal in Prosa — kein JSON, kein Marker.",
     ].join("\n")
   }
 
@@ -525,38 +580,26 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
     options: this["ParsedCallOptions"],
     runManager?: CallbackManagerForLLMRun
   ): AsyncGenerator<ChatGenerationChunk> {
-    // Tool-Modus lässt sich nicht token-weise streamen (wir brauchen das ganze JSON
-    // zum Parsen). → einmal `_generate` ausführen und als ein Chunk samt tool_calls liefern.
-    if (options?.tools && options.tools.length > 0) {
-      const result = await this._generate(messages, options, runManager)
-      const gen = result.generations[0]
-      const aiMsg = gen.message as AIMessage
-      const toolCalls = (aiMsg.tool_calls ?? []) as Array<{ name: string; args?: unknown; id?: string }>
-      yield new ChatGenerationChunk({
-        text: gen.text,
-        message: new AIMessageChunk({
-          content: aiMsg.content as string,
-          tool_call_chunks: toolCalls.map((tc, i) => ({
-            name: tc.name,
-            args: JSON.stringify(tc.args ?? {}),
-            id: tc.id,
-            index: i,
-            type: "tool_call_chunk" as const,
-          })),
-          usage_metadata: (aiMsg as { usage_metadata?: CliUsage }).usage_metadata,
-          response_metadata: aiMsg.response_metadata,
-        }),
-      })
-      return
-    }
+    // Auch im Tool-Modus wird gestreamt: Ein Tool-Aufruf muss mit `TOOL_CALL` beginnen,
+    // alles andere ist Prosa. Wir puffern nur den Kopf der Ausgabe, bis das entschieden
+    // ist (`sniffToolHead`) — danach fließen Prosa-Chunks unverändert durch.
+    const tools = options?.tools
+    const toolMode = !!(tools && tools.length > 0)
 
     const { systemPrompt, userPrompt } = this.messagesToCliInput(messages)
-    const args = this.buildArgs(true, systemPrompt)
-    const stdin = this.composeStdin(systemPrompt, userPrompt)
+    const effectiveSystem = toolMode
+      ? [systemPrompt, this.buildToolInstruction(tools!)].filter((s) => s && s.trim()).join("\n\n")
+      : systemPrompt
+    const args = this.buildArgs(true, effectiveSystem)
+    const stdin = this.composeStdin(effectiveSystem, userPrompt)
 
     let finalUsage: CliUsage | undefined
     let finalMeta: Record<string, unknown> = {}
     let lastRateLimit: { limitType?: string; resetsAt?: Date } | undefined
+
+    /** `pending` nur im Tool-Modus — ohne Tools ist jede Ausgabe sofort Prosa. */
+    let verdict: HeadVerdict = toolMode ? "pending" : "prose"
+    let head = ""
 
     for await (const line of this.runCliStreaming(args, stdin, options?.signal)) {
       const parsed = this.parseStreamLine(line)
@@ -574,14 +617,56 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
       }
 
       if (parsed.text) {
-        await runManager?.handleLLMNewToken(parsed.text)
-        yield new ChatGenerationChunk({
-          text: parsed.text,
-          message: new AIMessageChunk({ content: parsed.text }),
-        })
+        if (verdict === "pending") {
+          head += parsed.text
+          verdict = sniffToolHead(head)
+          if (verdict === "prose") {
+            // Fehlalarm-frei: der gepufferte Kopf geht als erster Chunk raus.
+            await runManager?.handleLLMNewToken(head)
+            yield new ChatGenerationChunk({
+              text: head,
+              message: new AIMessageChunk({ content: head }),
+            })
+            head = ""
+          }
+        } else if (verdict === "tool") {
+          head += parsed.text
+        } else {
+          await runManager?.handleLLMNewToken(parsed.text)
+          yield new ChatGenerationChunk({
+            text: parsed.text,
+            message: new AIMessageChunk({ content: parsed.text }),
+          })
+        }
       }
       if (parsed.usage) finalUsage = parsed.usage
       if (parsed.responseMetadata) finalMeta = { ...finalMeta, ...parsed.responseMetadata }
+    }
+
+    // Gepufferter Kopf übrig → entweder ein Tool-Aufruf oder eine sehr kurze Antwort.
+    if (head) {
+      const decision = parseToolDecision(head)
+      if (decision.kind === "tool_call") {
+        yield new ChatGenerationChunk({
+          text: "",
+          message: new AIMessageChunk({
+            content: "",
+            tool_call_chunks: decision.calls.map((tc, i) => ({
+              name: tc.name,
+              args: JSON.stringify(tc.args ?? {}),
+              id: tc.id,
+              index: i,
+              type: "tool_call_chunk" as const,
+            })),
+          }),
+        })
+      } else if (decision.text) {
+        await runManager?.handleLLMNewToken(decision.text)
+        yield new ChatGenerationChunk({
+          text: decision.text,
+          message: new AIMessageChunk({ content: decision.text }),
+        })
+      }
     }
 
     // Abschluss-Chunk trägt Usage/Metadaten (analog zu nativen Chat-Models).
@@ -760,6 +845,7 @@ export class ClaudeCLI_LLM extends CLI_LLM {
       "--system-prompt", systemPrompt, // "" ersetzt den Default-Coding-Prompt
       "--tools", "", // alle Built-in-Tools aus → reines LLM
       "--strict-mcp-config", // keine fremden MCP-Server (saubere Umgebung)
+      ...(this.effort ? ["--effort", this.effort] : []),
     ]
     const output = stream
       ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
@@ -880,6 +966,8 @@ export class OpenAICLI_LLM extends CLI_LLM {
       "--sandbox", "read-only", // keine Datei-Schreibzugriffe
       "--skip-git-repo-check", // läuft auch im neutralen (Nicht-Git-)cwd
       "-m", this.model,
+      // Codex hat kein --effort-Flag; die Stufe ist ein Config-Override.
+      ...(this.effort ? ["-c", `model_reasoning_effort="${this.effort}"`] : []),
       ...this.extraArgs,
       "-", // Prompt komplett aus stdin lesen
     ]
