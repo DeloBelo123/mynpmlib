@@ -1,5 +1,5 @@
 import type { ChatGroq, ChatOpenAI } from "../../imports"
-import type { ClaudeCLIModel, OpenAICLIModel } from "./cli-llms"
+import type { ClaudeCLIModel, CodexCLIModel } from "./cli-llms"
 
 export type Prettify<T> = {
   [K in keyof T]: T[K]
@@ -36,9 +36,15 @@ export type OpenRouterModel = AutoComplete<
   | "anthropic/claude-opus-4.6"
   | "anthropic/claude-opus-4.6-fast"
   | "anthropic/claude-opus-4.7"
+  | "anthropic/claude-opus-4.7-fast"
+  | "anthropic/claude-opus-4.8"
+  | "anthropic/claude-opus-4.8-fast"
+  | "anthropic/claude-opus-5"
+  | "anthropic/claude-opus-5-fast"
   | "anthropic/claude-sonnet-4"
   | "anthropic/claude-sonnet-4.5"
   | "anthropic/claude-sonnet-4.6"
+  | "anthropic/claude-sonnet-5"
   | "arcee-ai/trinity-large-thinking"
   | "arcee-ai/trinity-mini"
   | "bytedance-seed/seed-2.0-lite"
@@ -114,6 +120,14 @@ export type OpenRouterModel = AutoComplete<
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4-nano"
   | "openai/gpt-5.4-pro"
+  | "openai/gpt-5.5"
+  | "openai/gpt-5.5-pro"
+  | "openai/gpt-5.6-luna"
+  | "openai/gpt-5.6-luna-pro"
+  | "openai/gpt-5.6-sol"
+  | "openai/gpt-5.6-sol-pro"
+  | "openai/gpt-5.6-terra"
+  | "openai/gpt-5.6-terra-pro"
   | "openai/gpt-oss-120b"
   | "openai/gpt-oss-20b"
   | "openai/gpt-oss-safeguard-20b"
@@ -237,7 +251,7 @@ type CLILLMConfigBase = {
 }
 
 export type ClaudeCLILLMConfig = CLILLMConfigBase & { provider: "claude-cli"; model?: ClaudeCLIModel }
-export type OpenAICLILLMConfig = CLILLMConfigBase & { provider: "openai-cli"; model?: OpenAICLIModel }
+export type CodexCLILLMConfig = CLILLMConfigBase & { provider: "codex-cli"; model?: CodexCLIModel }
 
 export type LLMConfig =
   | GroqLLMConfig
@@ -245,7 +259,7 @@ export type LLMConfig =
   | OpenRouterFreeLLMConfig
   | LocalLLMConfig
   | ClaudeCLILLMConfig
-  | OpenAICLILLMConfig
+  | CodexCLILLMConfig
 
 // ────────────────────────────────────────────────────────────────────────────
 // getLLM-Rückgabetypen

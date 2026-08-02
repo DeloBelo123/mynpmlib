@@ -1,5 +1,5 @@
 import { ChatGroq, ChatOpenAI } from "../../imports";
-import { ClaudeCLI_LLM, OpenAICLI_LLM } from "./cli-llms";
+import { ClaudeCLI_LLM, CodexCLI_LLM } from "./cli-llms";
 import {
   FreeOpenRouterLLM,
   getFreeOpenRouterLLM,
@@ -15,7 +15,7 @@ import type {
   OpenRouterFreeLLMConfig,
   LocalLLMConfig,
   ClaudeCLILLMConfig,
-  OpenAICLILLMConfig,
+  CodexCLILLMConfig,
   GroqLLM,
   OpenRouterLLM,
   LocalLLM,
@@ -43,11 +43,11 @@ export function getLLM(config: OpenRouterFreeLLMConfig): Promise<FreeOpenRouterL
  *
  * provider "claude-cli": nutzt die eingeloggte `claude -p` CLI als reines LLM (Default-Model "claude-opus-4-8")
  *
- * provider "openai-cli": nutzt `codex exec` als reines LLM (Default-Model "gpt-5.5"; CLI muss installiert sein)
+ * provider "codex-cli": nutzt `codex exec` als reines LLM (Default-Model "gpt-5.5"; CLI muss installiert sein)
  */
 export function getLLM(
-  config: GroqLLMConfig | OpenRouterLLMConfig | LocalLLMConfig | ClaudeCLILLMConfig | OpenAICLILLMConfig
-): GroqLLM | OpenRouterLLM | LocalLLM | ClaudeCLI_LLM | OpenAICLI_LLM
+  config: GroqLLMConfig | OpenRouterLLMConfig | LocalLLMConfig | ClaudeCLILLMConfig | CodexCLILLMConfig
+): GroqLLM | OpenRouterLLM | LocalLLM | ClaudeCLI_LLM | CodexCLI_LLM
 export function getLLM(config: LLMConfig) {
   switch (config.provider) {
     case "chatgroq": {
@@ -108,9 +108,9 @@ export function getLLM(config: LLMConfig) {
       })
     }
 
-    case "openai-cli": {
+    case "codex-cli": {
       // nutzt die `codex exec`-CLI (muss installiert + eingeloggt sein: `npm i -g @openai/codex`).
-      return new OpenAICLI_LLM({
+      return new CodexCLI_LLM({
         model: config.model,
         systemPrompt: config.systemPrompt,
         cwd: config.cwd,

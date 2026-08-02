@@ -399,7 +399,7 @@ export interface CLILLMParams extends BaseChatModelParams {
 }
 
 /**
- * Abstrakte Basisklasse. Subklassen (`ClaudeCLI_LLM`, `OpenAICLI_LLM`) definieren
+ * Abstrakte Basisklasse. Subklassen (`ClaudeCLI_LLM`, `CodexCLI_LLM`) definieren
  * nur das CLI-spezifische: Binary, Args, und das Parsen von Output/Stream.
  */
 export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
@@ -412,7 +412,7 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
   timeoutMs?: number
   env?: Record<string, string>
 
-  /** Provider-Tag, analog zu `getLLM()`-Rückgaben (`"claude-cli"`, `"openai-cli"`). */
+  /** Provider-Tag, analog zu `getLLM()`-Rückgaben (`"claude-cli"`, `"codex-cli"`). */
   provider: string
 
   /** Baut die CLI-Argumente. `systemPrompt` ist der effektive (ggf. aus Messages stammende). */
@@ -811,12 +811,14 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
 // ──────────────────────────────────────────────────────────────────────────
 
 /**
- * Volle, versionierte Model-IDs, die `claude --model` akzeptiert (aktuelle Modelle, Stand 2026-06).
+ * Volle, versionierte Model-IDs, die `claude --model` akzeptiert (aktuelle Modelle, Stand 2026-08).
  * Aliasse wie "opus"/"sonnet"/"haiku"/"fable" funktionieren via `AutoComplete` ebenfalls,
  * zeigen aber immer auf das jeweils neueste Modell — daher hier bewusst die genauen IDs.
  */
 export type ClaudeCLIModel = AutoComplete<
   | "claude-fable-5"
+  | "claude-opus-5"
+  | "claude-sonnet-5"
   | "claude-opus-4-8"
   | "claude-opus-4-7"
   | "claude-opus-4-6"
@@ -938,24 +940,27 @@ export class ClaudeCLI_LLM extends CLI_LLM {
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Von `codex -m/--model` akzeptiert (siehe developers.openai.com/codex/models). */
-export type OpenAICLIModel = AutoComplete<
+export type CodexCLIModel = AutoComplete<
+  | "gpt-5.6-sol"
+  | "gpt-5.6-terra"
+  | "gpt-5.6-luna"
   | "gpt-5.5"
   | "gpt-5.4"
   | "gpt-5.4-mini"
   | "gpt-5.3-codex-spark"
 >
 
-export interface OpenAICLILLMParams extends CLILLMParams {
-  model?: OpenAICLIModel
+export interface CodexCLILLMParams extends CLILLMParams {
+  model?: CodexCLIModel
 }
 
-export class OpenAICLI_LLM extends CLI_LLM {
+export class CodexCLI_LLM extends CLI_LLM {
   static lc_name(): string {
-    return "OpenAICLI_LLM"
+    return "CodexCLI_LLM"
   }
 
-  constructor(fields: OpenAICLILLMParams = {}) {
-    super(fields, { model: "gpt-5.5", cliPath: "codex", provider: "openai-cli" })
+  constructor(fields: CodexCLILLMParams = {}) {
+    super(fields, { model: "gpt-5.5", cliPath: "codex", provider: "codex-cli" })
   }
 
   protected buildArgs(_stream: boolean, _systemPrompt: string): string[] {
