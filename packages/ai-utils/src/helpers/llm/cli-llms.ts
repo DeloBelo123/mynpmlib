@@ -13,7 +13,7 @@ import {
   type ChatResult,
   type CallbackManagerForLLMRun,
 } from "../../imports"
-import type { AutoComplete } from "./types"
+import type { AutoComplete, ReasoningLevel } from "./types"
 import { spawn } from "node:child_process"
 import { createInterface } from "node:readline"
 import { tmpdir } from "node:os"
@@ -379,11 +379,26 @@ interface CLIDefaults {
  */
 export type CLIEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
 
+/**
+ * `ReasoningLevel` aus der `getLLM`-Config → CLI-`effort`.
+ * `"none"`/undefined → kein `--effort`-Flag (die CLIs können Reasoning nicht
+ * abschalten, es gilt ihr Default); `"minimal"` → kleinste CLI-Stufe `"low"`.
+ */
+export function toCLIEffort(level?: ReasoningLevel): CLIEffort | undefined {
+  if (!level || level === "none") return undefined
+  return level === "minimal" ? "low" : level
+}
+
 export interface CLILLMParams extends BaseChatModelParams {
   /** Model-Name, der per `--model`/`-m` an die CLI gereicht wird. */
   model?: string
   /** Reasoning-Aufwand; wird provider-spezifisch auf das jeweilige CLI-Flag abgebildet. */
   effort?: CLIEffort
+  /**
+   * Web-Suche erlauben. Bei Claude wird dafür das eingebaute `WebSearch`-Tool
+   * freigegeben (sonst laufen alle Built-ins aus); Codex bringt Web-Zugriff mit.
+   */
+  webSearch?: boolean
   /** System-Prompt. Default `""` → ersetzt den Default-(Coding-)Systemprompt der CLI. */
   systemPrompt?: string
   /** Arbeitsverzeichnis des Subprozesses. Default: neutrales Temp-Verzeichnis. */
@@ -405,6 +420,7 @@ export interface CLILLMParams extends BaseChatModelParams {
 export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
   model: string
   effort?: CLIEffort
+  webSearch: boolean
   systemPrompt: string
   cwd: string
   cliPath: string
@@ -436,6 +452,7 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
     this.provider = defaults.provider
     this.model = fields.model ?? defaults.model
     this.effort = fields.effort
+    this.webSearch = fields.webSearch ?? false
     this.systemPrompt = fields.systemPrompt ?? ""
     this.cwd = fields.cwd ?? neutralCwd()
     this.cliPath = fields.cliPath ?? defaults.cliPath
@@ -845,7 +862,12 @@ export class ClaudeCLI_LLM extends CLI_LLM {
       "-p",
       "--model", this.model,
       "--system-prompt", systemPrompt, // "" ersetzt den Default-Coding-Prompt
-      "--tools", "", // alle Built-in-Tools aus → reines LLM
+      // Built-ins aus → reines LLM. Mit `webSearch` genau eines wieder an, plus
+      // Freigabe: ohne `--allowedTools` fragt die CLI im `-p`-Modus nach Erlaubnis
+      // und antwortet stattdessen „Ich benötige deine Genehmigung".
+      ...(this.webSearch
+        ? ["--tools", "WebSearch", "--allowedTools", "WebSearch"]
+        : ["--tools", ""]),
       "--strict-mcp-config", // keine fremden MCP-Server (saubere Umgebung)
       ...(this.effort ? ["--effort", this.effort] : []),
     ]
@@ -965,6 +987,7 @@ export class CodexCLI_LLM extends CLI_LLM {
 
   protected buildArgs(_stream: boolean, _systemPrompt: string): string[] {
     // codex exec gibt mit --json in beiden Fällen NDJSON aus.
+    // Web-Zugriff bringt Codex von Haus aus mit — `webSearch` braucht hier kein Flag.
     return [
       "exec",
       "--json",

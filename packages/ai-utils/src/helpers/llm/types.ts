@@ -157,6 +157,36 @@ export type OpenRouterModel = AutoComplete<
   | "z-ai/glm-5v-turbo"
 >
 
+/**
+ * OpenAI Platform-API (api.openai.com/v1) — die gängigsten Chat-Modelle
+ * (`gpt-5.6`-Reihe … `gpt-4.1`). Ältere/spezielle IDs (Audio, Realtime, o-Reihe)
+ * gehen via `AutoComplete` weiterhin durch.
+ */
+export type OpenAIModel = AutoComplete<
+  | "gpt-5.6-sol"
+  | "gpt-5.6-sol-pro"
+  | "gpt-5.6-terra"
+  | "gpt-5.6-terra-pro"
+  | "gpt-5.6-luna"
+  | "gpt-5.6-luna-pro"
+  | "gpt-5.5"
+  | "gpt-5.5-pro"
+  | "gpt-5.4"
+  | "gpt-5.4-mini"
+  | "gpt-5.4-nano"
+  | "gpt-5.4-pro"
+  | "gpt-5.3-chat"
+  | "gpt-5.3-codex"
+  | "gpt-5.2"
+  | "gpt-5.2-pro"
+  | "gpt-5.1"
+  | "gpt-5.1-codex-max"
+  | "gpt-5"
+  | "gpt-5-mini"
+  | "gpt-4.1"
+  | "gpt-4.1-mini"
+>
+
 /** LM Studio Model-IDs (kurze Hub-Bezeichner, siehe GET /v1/models). */
 export type LocalModel = AutoComplete<
   | "google/gemma-4-12b-qat"
@@ -181,15 +211,29 @@ export type LocalModel = AutoComplete<
 export type ReasoningLevel = "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
 
 export type LLMRuntimeConfig = {
-  /** Sampling-Temperatur (analog zum `ChatOpenAI`-Config). */
+  /**
+   * Sampling-Temperatur (analog zum `ChatOpenAI`-Config). Von `claude-cli` /
+   * `codex-cli` ignoriert — die CLIs haben dafür kein Flag.
+   */
   temperature?: number
   /**
-   * Nur `openrouter`: Reasoning-Aufwand des Models. Default `"none"` = kein
-   * Reasoning (kein Overhead, wie früher `reasoning: false`). Jede andere Stufe
-   * schaltet Reasoning ein (`reasoning: { effort }` im Request-Body +
-   * `__includeRawResponse`, damit die Tokens auslesbar werden) — Voraussetzung
-   * dafür, dass `.stream({ showReasoning: true })` überhaupt Reasoning-Events
-   * liefert. `showReasoning` allein ist nur der Leser.
+   * Reasoning-Aufwand des Models. Default `"none"` = kein Reasoning (kein
+   * Overhead, wie früher `reasoning: false`); dann wird gar kein Parameter
+   * gesetzt und es gilt der Provider-Default. Jede andere Stufe schaltet
+   * Reasoning ein — provider-spezifisch abgebildet:
+   *
+   * - `openrouter` (auch `free: true`): `reasoning: { effort }` im Request-Body
+   *   + `__includeRawResponse`, damit die Tokens auslesbar werden — Voraussetzung
+   *   dafür, dass `.stream({ showReasoning: true })` überhaupt Reasoning-Events
+   *   liefert. `showReasoning` allein ist nur der Leser.
+   * - `openai` / `local`: `reasoning_effort` (ChatOpenAI-`reasoningEffort`).
+   * - `claude-cli` / `codex-cli`: `--effort` bzw. `-c model_reasoning_effort`;
+   *   `"minimal"` wird auf die kleinste CLI-Stufe `"low"` gemappt.
+   * - `chatgroq`: wirkungslos — `@langchain/groq` kennt keinen
+   *   `reasoning_effort`-Parameter.
+   *
+   * Nicht jedes Model unterstützt jede Stufe; nicht unterstützte Stufen
+   * ignoriert der Provider (die CLIs fallen auf ihren Default zurück).
    */
   reasoning?: ReasoningLevel
 }
@@ -197,6 +241,13 @@ export type LLMRuntimeConfig = {
 export type GroqLLMConfig = {
   provider: "chatgroq"
   model?: ChatGroqModel
+  apikey?: string
+  config?: LLMRuntimeConfig
+}
+
+export type OpenAILLMConfig = {
+  provider: "openai"
+  model?: OpenAIModel
   apikey?: string
   config?: LLMRuntimeConfig
 }
@@ -248,6 +299,11 @@ type CLILLMConfigBase = {
   extraArgs?: string[]
   /** Timeout in ms. */
   timeoutMs?: number
+  /**
+   * Wie bei allen anderen Providern. Hier wirkt nur `reasoning` (→ CLI-`effort`);
+   * `temperature` kennen die CLIs nicht.
+   */
+  config?: LLMRuntimeConfig
 }
 
 export type ClaudeCLILLMConfig = CLILLMConfigBase & { provider: "claude-cli"; model?: ClaudeCLIModel }
@@ -255,6 +311,7 @@ export type CodexCLILLMConfig = CLILLMConfigBase & { provider: "codex-cli"; mode
 
 export type LLMConfig =
   | GroqLLMConfig
+  | OpenAILLMConfig
   | OpenRouterLLMConfig
   | OpenRouterFreeLLMConfig
   | LocalLLMConfig
@@ -267,5 +324,6 @@ export type LLMConfig =
 
 // getLLM stempelt `.provider` auf die Instanz; `.model` bringen die Klassen selbst mit.
 export type GroqLLM = ChatGroq & { provider?: "chatgroq" }
+export type OpenAILLM = ChatOpenAI & { provider?: "openai" }
 export type OpenRouterLLM = ChatOpenAI & { provider?: "openrouter" }
 export type LocalLLM = ChatOpenAI & { provider?: "local" }

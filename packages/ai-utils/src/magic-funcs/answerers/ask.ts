@@ -26,7 +26,7 @@ export async function ask({
     question: string
 }){
     const prompt = ChatPromptTemplate.fromMessages([
-      ["system", `Du bist ein hilfreicher Assistent.`],
+      ["system", `Du bist ein hilfreicher Assistent der Fragen beantwortet.`],
       ["human", "{input}"]
     ])
     const chain = createSimpleChain(prompt, llm, new StringOutputParser())
