@@ -35,48 +35,31 @@ export function *range(
     }
 }
 
-export function pick<
-  T extends Record<PropertyKey, any>,
-  const K extends readonly (keyof T)[]
->(
-  obj: T,
-  keys: K
-): Pick<T, K[number]> {
-  const out = {} as Pick<T, K[number]>
-  for (const k of keys) {
-    if (k in obj) out[k] = obj[k]
-  }
-  return out
+export async function sleep(ms:number){
+    return new Promise((res) => setTimeout(res,1000) )
 }
 
-
-export function omit<
-  T extends Record<PropertyKey, any>,
-  const K extends readonly (keyof T)[]
->(
-  obj: T,
-  keys: K
-): Omit<T, K[number]> {
-  const out = { ...obj } 
-  for (const k of keys) {
-    delete out[k]
-  }
-  return out
+export function isEmpty<T>(x:Array<T> | Record<string,T>): boolean{
+  if(Array.isArray(x)) if(x.length === 0) return true
+  if(Object.keys(x).length === 0) return true
+  return false
 }
 
-
-export function array<T>(iter:Iterable<T>):Array<T>{
-    const arr = []
-    for(const item of iter){
-        arr.push(item)
+export function cache<T>(name:string,value:T){
+  const map = new Map([[name,value]])
+  return {
+    set(name:string,value:T){
+      map.set(name,value)
+    },
+    get(name:string){
+      return map.get(name)
     }
-    return arr
+  }
 }
 
-export function object<T extends readonly [PropertyKey,any][]>(arr:T){
-    const obj:Record<PropertyKey,any> = {} 
-    for(const [k,v] of arr){
-        obj[k] = v
-    }
-    return obj
-}
+
+
+
+
+
+

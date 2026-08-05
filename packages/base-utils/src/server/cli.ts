@@ -16,6 +16,7 @@ export function input(prompt: string = ''): Promise<string> {
 }
 
 export const terminal = {
+    //kurlaufender scheiss
     exec: async function(command:string):Promise<string>{
         return new Promise((resolve, reject) => {
             exec(command, (error, stdout, stderr) => {
@@ -28,6 +29,7 @@ export const terminal = {
           });
     },
     
+    //langer scheiss (muss ja prozess gestartet werden wegen dem amk)
     run: async function(command:string):Promise<number>{
         return new Promise((resolve, reject) => {
             const proc = spawn(command, {

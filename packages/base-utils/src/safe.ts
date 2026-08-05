@@ -1,4 +1,4 @@
-type Result<T,E> = [T, null] | [null, E]
+export type Result<T,E> = [T, null] | [null, E]
 
 export async function safe<T, E = Error>(promise:Promise<T>): Promise<Result<T, E>> {
     try {

@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'path'
 
 function getProjectRoot(): string {
-    return path.resolve(__dirname, '../../../..')
+    return path.resolve(import.meta.dirname, '../../../..')
 }
 
 export async function createFile(file: string, content: string): Promise<boolean>{
