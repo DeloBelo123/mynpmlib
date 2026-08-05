@@ -6,6 +6,7 @@ import {
   OPENROUTER_BASE_URL,
   OPENROUTER_EU_BASE_URL,
   OPENROUTER_DATA_SAFE_KWARGS,
+  openRouterReasoningEnabled,
   openRouterReasoningKwargs,
 } from "./free-llm";
 import type {
@@ -130,7 +131,9 @@ export function getLLM(config: LLMConfig) {
         model: config.model ?? "openai/gpt-5.4-mini",
         ...(Object.keys(modelKwargs).length > 0 ? { modelKwargs } : {}),
         // Reasoning-Tokens landen bei OpenRouter in der Roh-Response → nur mit diesem Flag lesbar.
-        ...(reasoningKwargs ? { __includeRawResponse: true } : {}),
+        ...(openRouterReasoningEnabled(config.config?.reasoning)
+          ? { __includeRawResponse: true }
+          : {}),
         ...(config.config?.temperature !== undefined ? { temperature: config.config.temperature } : {}),
       })
       llm.provider = "openrouter"

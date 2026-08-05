@@ -25,16 +25,33 @@ export const OPENROUTER_DATA_SAFE_KWARGS = {
 
 /**
  * Baut die OpenRouter-modelKwargs für einen Reasoning-Level: `reasoning: { effort }`
- * im Request-Body (ChatOpenAI reicht `modelKwargs` unverändert durch). `"none"`/leer
- * ⇒ `undefined` (kein Reasoning). Damit die zurückkommenden `delta.reasoning`-Tokens
- * auch auslesbar sind, muss die Instanz ZUSÄTZLICH mit `__includeRawResponse: true`
- * gebaut werden (siehe getLLM/getFreeOpenRouterLLM).
+ * im Request-Body (ChatOpenAI reicht `modelKwargs` unverändert durch).
+ *
+ * `"none"` sendet AKTIV `reasoning: { effort: "none" }` — das ist NICHT dasselbe wie
+ * „Feld weglassen". Modelle mit Thinking-Default AN (z.B. `deepseek-v4-flash-0731`,
+ * Default-Effort `high`) denken sonst weiter, obwohl der Aufrufer Reasoning
+ * ausdrücklich abbestellt hat. Nur ein fehlender Level (`undefined`) heißt „Feld
+ * weglassen, Model-Default gilt".
+ *
+ * Damit die zurückkommenden `delta.reasoning`-Tokens auch auslesbar sind, muss die
+ * Instanz ZUSÄTZLICH mit `__includeRawResponse: true` gebaut werden — aber nur, wenn
+ * überhaupt gedacht wird, siehe `openRouterReasoningEnabled`.
  */
 export function openRouterReasoningKwargs(
   level?: ReasoningLevel,
 ): { reasoning: { effort: ReasoningLevel } } | undefined {
-  if (!level || level === "none") return undefined
+  if (!level) return undefined
   return { reasoning: { effort: level } }
+}
+
+/**
+ * Ob für diesen Level echte Reasoning-Tokens zu erwarten sind. Einzige Quelle der
+ * Regel „`none` zählt nicht als Reasoning", damit `getLLM` und `getFreeOpenRouterLLM`
+ * `__includeRawResponse` nicht unterschiedlich setzen: bei `none` wäre das Flag reiner
+ * Overhead (es gibt nichts zu lesen).
+ */
+export function openRouterReasoningEnabled(level?: ReasoningLevel): boolean {
+  return !!level && level !== "none"
 }
 
 /**
@@ -383,7 +400,9 @@ export async function getFreeOpenRouterLLM(config: {
     apiKey: config.apikey ?? process.env.OPENROUTER_API_KEY,
     baseURL,
     ...(Object.keys(modelKwargs).length > 0 ? { modelKwargs } : {}),
-    ...(reasoningKwargs ? { includeRawResponse: true } : {}),
+    ...(openRouterReasoningEnabled(config.config?.reasoning)
+      ? { includeRawResponse: true }
+      : {}),
     ...(config.config?.temperature !== undefined ? { temperature: config.config.temperature } : {}),
   })
 }
