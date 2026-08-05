@@ -1,6 +1,6 @@
 {
   "name": "@delofarag/ai-utils",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,7 +19,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "dev": "tsx",
     "start": "tsx"
   },
