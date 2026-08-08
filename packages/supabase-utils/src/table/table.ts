@@ -68,7 +68,6 @@ export class SupabaseTable<T extends Record<string,any>> {
         }
         const { data, error } = await query;
         if (error) {
-            console.error("Error selecting data:", error);
             throw new Error(`Error selecting data from ${this.tableName}: ${error.message}`);
         }
         return (data ?? []) as Array<Record<keyof T, any>>;
@@ -234,11 +233,9 @@ export class SupabaseTable<T extends Record<string,any>> {
     public async safeGetRow({...values}:Partial<T>):Promise<T | null>{
         const row = await this.getRows({...values})
         if(row.length > 1){
-            console.error("Multiple rows found for values: " + JSON.stringify(values) + ", returning null")
             return null
         }
         if(row && row.length === 0){
-            console.error("No row found for values: " + JSON.stringify(values) + ", returning null")
             return null
         }
         return row[0]
@@ -267,7 +264,7 @@ export class SupabaseTable<T extends Record<string,any>> {
     }
 }
 
-export function selectTable({tableName,possibleTables}:{tableName:string,possibleTables:Array<SupabaseTable<Record<string,any>>>}){
+export function selectTable<T extends string>(tableName:T,possibleTables:Array<SupabaseTable<Record<string,any>>>){
     const table = possibleTables.find(table => table.tableName === tableName)
     if (!table) {
         throw new Error(`Table:'${tableName}' not found in possibleTables`)
