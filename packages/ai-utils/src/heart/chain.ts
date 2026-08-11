@@ -59,7 +59,7 @@ interface ChainProps<T extends OutputSchema>{
  * @example 
  * constructor({
         prompt = "du bist ein hilfreicher Assistent",
-        llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
+        llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.6-luna"}),
         output = DEFAULT_OUTPUT_SCHEMA as unknown as T as T
         vectorStore = undefined
     }:ChainProps<T>){
@@ -87,7 +87,7 @@ export class Chain<T extends OutputSchema = typeof DEFAULT_OUTPUT_SCHEMA> {
 
     constructor({
         prompt = "du bist ein hilfreicher Assistent",
-        llm = getLLM({ provider:"openrouter", model: "openai/gpt-5.4-mini"}),
+        llm = getLLM({ provider:"openrouter", model: "openai/gpt-5.6-luna"}),
         output = DEFAULT_OUTPUT_SCHEMA as unknown as T as T,
         vectorStore = undefined
     }:ChainProps<T> = {}){

@@ -206,6 +206,32 @@ export interface CLIToolSpec {
 /** Call-Optionen inkl. der via `bindTools` gebundenen Tools. */
 export interface CLILLMCallOptions extends BaseChatModelCallOptions {
   tools?: CLIToolSpec[]
+  /**
+   * Ein per `prewarm()` vorgestarteter Prozess. Passt sein System-Prompt zum Aufruf,
+   * wird nur noch der User-Prompt hineingeschrieben — das spart den Prozessstart
+   * (bei `claude -p` rund 2,5 Sekunden). Passt er nicht, wird er ignoriert und
+   * regulär gestartet; der Aufruf ist also nie falsch, höchstens langsam.
+   */
+  warm?: WarmCLIProcess
+}
+
+/**
+ * Ein CLI-Prozess, der bereits läuft und auf seinen Prompt wartet.
+ *
+ * **Der Aufrufer besitzt ihn.** Wird er nicht an einen Aufruf übergeben, muss
+ * `dispose()` ihn beenden — sonst bleibt ein Subprozess zurück. `expiresAt` ist
+ * nur ein Vorschlag für den Aufrufer; die Klasse räumt nicht von selbst auf.
+ */
+export interface WarmCLIProcess {
+  readonly provider: string
+  /** Nur ein Aufruf mit genau diesem System-Prompt darf ihn benutzen. */
+  readonly systemPrompt: string
+  /** Zeitpunkt, ab dem der Aufrufer ihn besser wegwirft. */
+  readonly expiresAt: Date
+  /** Schon verbraucht oder entsorgt — dann ist er nichts mehr wert. */
+  readonly spent: boolean
+  /** Beendet den Prozess. Mehrfach aufrufbar. */
+  dispose(): void
 }
 
 interface ToolCallLike {
@@ -363,6 +389,12 @@ export interface ParsedCliStreamLine {
    * eines späteren Fehlers — kein Fehler an sich.
    */
   rateLimit?: { limitType?: string; resetsAt?: Date }
+  /**
+   * Ein CLI-eigenes Werkzeug beginnt oder endet (z.B. Claudes `WebSearch`).
+   * Kein Text und kein Fehler — nur ein Hinweis, was gerade passiert, damit die
+   * Oberfläche „sucht im Netz" statt „denkt nach" zeigen kann.
+   */
+  tool?: { name: string; phase: "start" | "end" }
 }
 
 /** Provider-spezifische Defaults, die die Subklasse an `super()` reicht. */
@@ -618,7 +650,18 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
     let verdict: HeadVerdict = toolMode ? "pending" : "prose"
     let head = ""
 
-    for await (const line of this.runCliStreaming(args, stdin, options?.signal)) {
+    // Ein vorgewärmter Prozess zählt nur, wenn er zu genau diesem Aufruf passt —
+    // sonst bekäme die Antwort einen fremden System-Prompt.
+    const warm = options?.warm
+    const warmed =
+      warm instanceof WarmHandle &&
+      !warm.spent &&
+      warm.provider === this.provider &&
+      warm.systemPrompt === effectiveSystem
+        ? warm.take()
+        : undefined
+
+    for await (const line of this.runCliStreaming(args, stdin, options?.signal, warmed)) {
       const parsed = this.parseStreamLine(line)
       if (!parsed) continue
 
@@ -630,6 +673,14 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
           raw: line,
           limitType: parsed.error.limitType ?? lastRateLimit?.limitType,
           resetsAt: parsed.error.resetsAt ?? lastRateLimit?.resetsAt,
+        })
+      }
+
+      // Werkzeug-Hinweis: ein Chunk ohne Text. Wer nur Text zusammensetzt, merkt nichts.
+      if (parsed.tool) {
+        yield new ChatGenerationChunk({
+          text: "",
+          message: new AIMessageChunk({ content: "", additional_kwargs: { tool_activity: parsed.tool } }),
         })
       }
 
@@ -761,30 +812,60 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
   }
 
   /** Wie `runCli`, liefert stdout aber zeilenweise als Async-Iterator (für Streaming). */
-  protected async *runCliStreaming(
-    args: string[],
-    stdin: string,
-    signal?: AbortSignal
-  ): AsyncGenerator<string> {
+  /**
+   * Startet den Subprozess, ohne etwas hineinzuschreiben.
+   *
+   * Getrennt vom Lesen, damit ein Prozess schon laufen kann, bevor der Prompt
+   * feststeht (siehe `prewarm()`).
+   */
+  protected spawnCli(args: string[]): SpawnedCLI {
     const child = spawn(this.cliPath, args, {
       cwd: this.cwd,
       env: { ...process.env, ...this.env },
       stdio: ["pipe", "pipe", "pipe"],
     })
 
-    let stderr = ""
-    let spawnError: Error | undefined
-    let timedOut = false
+    const proc: SpawnedCLI = {
+      child,
+      stderr: "",
+      closed: new Promise<number | null>((resolve) => child.on("close", resolve)),
+    }
 
-    child.stderr!.on("data", (d) => (stderr += d.toString()))
+    child.stderr!.on("data", (d) => (proc.stderr += d.toString()))
     child.on("error", (err) => {
-      spawnError = new CLIError(
+      proc.spawnError = new CLIError(
         `Konnte '${this.cliPath}' nicht starten: ${err.message}. Ist die CLI installiert und im PATH?`,
         { provider: this.provider }
       )
     })
 
-    const closed = new Promise<number | null>((resolve) => child.on("close", resolve))
+    return proc
+  }
+
+  /**
+   * Startet die CLI vor, damit der Prozessstart nicht in der Wartezeit des Nutzers liegt.
+   *
+   * Der System-Prompt muss feststehen (er geht als Argument mit), die eigentliche
+   * Nachricht nicht — die kommt erst beim Aufruf über `options.warm` dazu. Bei
+   * `claude -p` spart das rund 2,5 Sekunden bis zum ersten Wort.
+   *
+   * **Der Aufrufer besitzt das Ergebnis**: wird es nicht benutzt, muss `dispose()`
+   * den Prozess beenden.
+   */
+  prewarm(systemPrompt: string, ttlMs = 180_000): WarmCLIProcess {
+    return new WarmHandle(this.provider, systemPrompt, this.spawnCli(this.buildArgs(true, systemPrompt)), ttlMs)
+  }
+
+  protected async *runCliStreaming(
+    args: string[],
+    stdin: string,
+    signal?: AbortSignal,
+    warmed?: SpawnedCLI
+  ): AsyncGenerator<string> {
+    const proc = warmed ?? this.spawnCli(args)
+    const child = proc.child
+    const closed = proc.closed
+    let timedOut = false
 
     const onAbort = () => child.kill("SIGTERM")
     if (signal) {
@@ -813,13 +894,53 @@ export abstract class CLI_LLM extends BaseChatModel<CLILLMCallOptions> {
     }
 
     const code = await closed
-    if (spawnError) throw spawnError
+    if (proc.spawnError) throw proc.spawnError
     if (timedOut) throw new CLIError(`${this.provider} CLI Timeout nach ${this.timeoutMs}ms`, { provider: this.provider, exitCode: code })
     if (signal?.aborted) throw new CLIError(`${this.provider} CLI abgebrochen`, { provider: this.provider, exitCode: code })
     if (code !== 0 && code !== null) {
       // Falls der Stream selbst kein Fehler-Event lieferte: aus stderr klassifizieren.
-      throw buildCliError(this.provider, stderr.trim() || `CLI Exit-Code ${code}`, { exitCode: code })
+      throw buildCliError(this.provider, proc.stderr.trim() || `CLI Exit-Code ${code}`, { exitCode: code })
     }
+  }
+}
+
+/** Ein gestarteter Subprozess samt allem, was zum Lesen und Aufräumen nötig ist. */
+interface SpawnedCLI {
+  child: ReturnType<typeof spawn>
+  stderr: string
+  spawnError?: Error
+  closed: Promise<number | null>
+}
+
+/** Umsetzung von `WarmCLIProcess` — hält den Prozess, bis ihn jemand nimmt oder wegwirft. */
+class WarmHandle implements WarmCLIProcess {
+  readonly expiresAt: Date
+  private proc?: SpawnedCLI
+
+  constructor(
+    readonly provider: string,
+    readonly systemPrompt: string,
+    proc: SpawnedCLI,
+    ttlMs: number
+  ) {
+    this.proc = proc
+    this.expiresAt = new Date(Date.now() + ttlMs)
+  }
+
+  get spent(): boolean {
+    return this.proc === undefined
+  }
+
+  /** Gibt den Prozess genau einmal heraus. Danach ist das Handle verbraucht. */
+  take(): SpawnedCLI | undefined {
+    const proc = this.proc
+    this.proc = undefined
+    return proc
+  }
+
+  dispose(): void {
+    this.proc?.child.kill("SIGTERM")
+    this.proc = undefined
   }
 }
 
@@ -926,6 +1047,23 @@ export class ClaudeCLI_LLM extends CLI_LLM {
     // Token-Deltas: { type:"stream_event", event:{ delta:{ type:"text_delta", text } } }
     if (obj.type === "stream_event" && obj.event?.delta?.type === "text_delta") {
       return { text: obj.event.delta.text }
+    }
+    // Ein CLI-eigenes Werkzeug legt los:
+    // { type:"stream_event", event:{ type:"content_block_start", content_block:{ type:"tool_use", name:"WebSearch" } } }
+    if (
+      obj.type === "stream_event" &&
+      obj.event?.type === "content_block_start" &&
+      obj.event.content_block?.type === "tool_use"
+    ) {
+      return { tool: { name: String(obj.event.content_block.name ?? "tool"), phase: "start" } }
+    }
+    // …und ist fertig: { type:"user", message:{ content:[{ type:"tool_result", … }] } }
+    if (
+      obj.type === "user" &&
+      Array.isArray(obj.message?.content) &&
+      obj.message.content.some((block: any) => block?.type === "tool_result")
+    ) {
+      return { tool: { name: "", phase: "end" } }
     }
     // Abschluss-Event: Fehler oder Usage/Kosten.
     if (obj.type === "result") {

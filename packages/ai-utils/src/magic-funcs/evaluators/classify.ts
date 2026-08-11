@@ -38,7 +38,7 @@ function createClassificationSchema<T extends readonly [string, ...string[]]>(cl
    * ```
    */
   export async function classify<const T extends readonly [string, ...string[]]>({
-    llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
+    llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.6-luna"}),
     data,
     classes,
     context

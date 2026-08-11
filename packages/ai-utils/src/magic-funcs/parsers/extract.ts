@@ -30,7 +30,7 @@ import { getLLM } from "../../helpers/llm/llms"
  * ```
  */
 export async function extract<T extends z.ZodObject>({
-    llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.4-mini"}),
+    llm = getLLM({provider:"openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.6-luna"}),
     data,
     goal,
     schema

@@ -16,7 +16,7 @@ Ein praktisches Utility-Package für LLM-Apps mit LangChain:
 Im Package gilt als Standard-LLM-Default für die allgemeine Nutzung:
 
 - **Provider:** `openrouter`
-- **Model:** `openai/gpt-5.4-mini`
+- **Model:** `openai/gpt-5.6-luna`
 
 Wenn du nichts explizit setzt, orientiere dich an diesem Default in deinen Aufrufen.
 
@@ -65,13 +65,13 @@ SUPABASE_SERVICE_ROLE_KEY=...
 ```ts
 import { getLLM } from "@delofarag/ai-utils"
 
-const llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" })
+const llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" })
 ```
 
 Beispiele:
 
 ```ts
-const llmOpenRouter = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" })
+const llmOpenRouter = getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" })
 const llmGroq = getLLM({ provider: "chatgroq", model: "llama-3.3-70b-versatile" })
 const llmLocal = getLLM({ provider: "local", model: "llama3.2:3b" })
 ```
@@ -139,7 +139,7 @@ const productBriefSchema = z.object({
 })
 
 const chain = new Chain({
-    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
+    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" }),
     prompt: "Du bist ein Product-Marketing-Assistent.",
     output: productBriefSchema
 })
@@ -199,7 +199,7 @@ const tools = new ToolRegistry([
 ]).allTools
 
 const agent = new Agent({
-    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
+    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" }),
     prompt: "Du darfst Tools nutzen wenn nötig.",
     tools
 })
@@ -320,7 +320,7 @@ Einige Namen weichen in ai-utils ab: `prompt` → `systemPrompt`, `agentsMd` →
 ```ts
 new DeepAgent({
     prompt,           // string | string[] — System-Prompt(s)
-    llm,              // BaseChatModel (Default: OpenRouter gpt-5.4-mini)
+    llm,              // BaseChatModel (Default: OpenRouter gpt-5.6-luna)
     tools,            // readonly DynamicStructuredTool[] (z.B. ToolRegistry.allTools)
     output,           // Zod-Schema für strukturierten Output
     checkpointer,     // BaseCheckpointSaver | boolean (Default: MemorySaver)
@@ -372,7 +372,7 @@ const tools = new ToolRegistry([
 ]).allTools
 
 const agent = new DeepAgent({
-    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
+    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" }),
     prompt: "Du bist ein Coding Agent. Arbeite nur im Workspace.",
     tools,
     checkpointer: new MemorySaver(),
@@ -786,7 +786,7 @@ Thread-State wird über LangGraph Checkpoint-Saver an `Agent` / `DeepAgent` geh�
 import { MemorySaver, SmartCheckpointSaver, getLLM } from "@delofarag/ai-utils"
 
 const checkpointer = new SmartCheckpointSaver(new MemorySaver(), {
-    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" }),
+    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" }),
     maxTokens: 24_000,
     keepLastMessages: 4
 })
@@ -807,7 +807,7 @@ Optionen:
 - `keepLastMessages` (default `4`) — Verbatim-Tail, wird auf Tool-Unit-Grenzen ausgerichtet
 - `maxSummaryWords` (default `300`)
 - `maxToolResultChars` (default `3000`) — Tool-Results werden im Summarizer-Input auf diese Länge gekürzt
-- `llm` (default OpenRouter `gpt-5.4-mini`, wird lazy erst beim ersten Summarize erzeugt)
+- `llm` (default OpenRouter `gpt-5.6-luna`, wird lazy erst beim ersten Summarize erzeugt)
 - `debug` — loggt Token-Stand, Trigger und erstellte Summaries
 
 ### `SupabaseCheckpointSaver`

@@ -371,7 +371,7 @@ interface SmartCheckpointSaverOptions {
     maxSummaryWords?: number
     /** Tool-Results werden im Summarizer-Input auf diese Zeichenzahl gekürzt. Default 3000 */
     maxToolResultChars?: number
-    /** LLM für die Zusammenfassung. Default (lazy): openrouter openai/gpt-5.4-mini */
+    /** LLM für die Zusammenfassung. Default (lazy): openrouter openai/gpt-5.6-luna */
     llm?: BaseChatModel
     debug?: boolean
 }
@@ -420,7 +420,7 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
     /** Default-LLM lazy erzeugen — so ist kein OPENROUTER_API_KEY nötig, solange nie summarized wird oder ein eigenes LLM übergeben wurde. */
     private getSummaryLLM(): BaseChatModel {
         if (!this.llm) {
-            this.llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.4-mini" })
+            this.llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" })
         }
         return this.llm
     }

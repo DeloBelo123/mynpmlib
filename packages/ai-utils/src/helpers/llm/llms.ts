@@ -67,9 +67,9 @@ export function getLLM(config: OpenRouterFreeLLMConfig): Promise<FreeOpenRouterL
  *
  * default llm for chatgroq: "llama-3.3-70b-versatile"
  *
- * default llm for openrouter: "openai/gpt-5.4-mini"
+ * default llm for openrouter: "openai/gpt-5.6-luna"
  *
- * default llm for openai: "gpt-5.4-mini"
+ * default llm for openai: "gpt-5.6-luna"
  *
  * default llm for local: "nvidia/nemotron-3-nano-4b"
  *
@@ -105,7 +105,7 @@ export function getLLM(config: LLMConfig) {
     case "openai": {
       const llm: OpenAILLM = new ChatOpenAI({
         apiKey: config.apikey ?? process.env.OPENAI_API_KEY,
-        model: config.model ?? "gpt-5.4-mini",
+        model: config.model ?? "gpt-5.6-luna",
         ...reasoningEffortKwargs(config.config?.reasoning),
         ...(config.config?.temperature !== undefined ? { temperature: config.config.temperature } : {}),
       });
@@ -128,7 +128,7 @@ export function getLLM(config: LLMConfig) {
         configuration: {
           baseURL: config.dataSafe ? OPENROUTER_EU_BASE_URL : OPENROUTER_BASE_URL,
         },
-        model: config.model ?? "openai/gpt-5.4-mini",
+        model: config.model ?? "openai/gpt-5.6-luna",
         ...(Object.keys(modelKwargs).length > 0 ? { modelKwargs } : {}),
         // Reasoning-Tokens landen bei OpenRouter in der Roh-Response → nur mit diesem Flag lesbar.
         ...(openRouterReasoningEnabled(config.config?.reasoning)
