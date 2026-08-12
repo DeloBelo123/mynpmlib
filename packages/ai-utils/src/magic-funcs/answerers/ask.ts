@@ -7,7 +7,7 @@ import { BaseChatModel, ChatPromptTemplate, StringOutputParser } from "../../imp
  *
  * Sinnvoll fuer schnelle Q&A-Use-Cases ohne zusaetzliche Struktur oder Tools.
  *
- * @param params.llm Optionales Chat-LLM. Default: `getLLM({ provider: "openrouter" })`.
+ * @param params.llm Optionales Chat-LLM. Default: `getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" })`.
  * @param params.question Die Frage, die beantwortet werden soll.
  * @returns Die Modellantwort als String.
  *
@@ -19,7 +19,7 @@ import { BaseChatModel, ChatPromptTemplate, StringOutputParser } from "../../imp
  * ```
  */
 export async function ask({
-    llm = getLLM({ provider: "openrouter" }),
+    llm = getLLM({ provider: "openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.6-luna" }),
     question
 }: {
     llm?: BaseChatModel

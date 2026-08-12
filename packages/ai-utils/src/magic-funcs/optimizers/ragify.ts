@@ -21,7 +21,7 @@ import { StringOutputParser } from "../../imports"
  * ```
  */
 export async function ragify({
-    llm = getLLM({ provider: "chatgroq", apikey: process.env.CHATGROQ_API_KEY ?? "" }),
+    llm = getLLM({ provider: "openrouter", apikey: process.env.OPENROUTER_API_KEY ?? "", model: "openai/gpt-5.6-luna" }),
     data,
   }: {
     llm?: BaseChatModel
