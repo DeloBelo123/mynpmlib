@@ -1,8 +1,8 @@
 import * as fs from 'node:fs/promises'
-import * as path from 'path'
+import * as pa from 'path'
 
-export function getProjectRoot(): string {
-    return path.resolve(import.meta.dirname, '../../../..')
+export function cwd(): string {
+    return process.cwd()
 }
 
 // Files
@@ -11,89 +11,78 @@ export function getProjectRoot(): string {
  * legt die Datei an und erstellt dabei automatisch alle fehlenden Ordner
  * aus dem Pfad. Existiert die Datei schon, passiert nichts.
  */
-export async function createFile(file: string, content: string): Promise<boolean>{
+export async function createFile(path: string, content: string): Promise<boolean>{
     try{
-        if(await fileExist(file)) return true
-        await fs.mkdir(path.dirname(file), { recursive: true })
-        await fs.writeFile(file, content, 'utf-8')
+        if(await fileExist(path)) return true
+        await fs.mkdir(pa.dirname(path), { recursive: true })
+        await fs.writeFile(path, content, 'utf-8')
         return true
     }catch(e){
-        console.error(`Fehler beim Erstellen der Datei: '${file}': ${e}`)
+        console.error(`Fehler beim Erstellen der Datei: '${path}': ${e}`)
         return false
     }
 }
 
-export async function readFile(file: string): Promise<string> {
-    let filePath = path.resolve(file)
-    
-    if (!path.isAbsolute(file)) {
-        const projectRoot = getProjectRoot()
-        filePath = path.join(projectRoot, file)
-        
-        try {
-            await fs.access(filePath)
-        } catch {
-            filePath = path.resolve(file)
-        }
-    }
-    
+export async function readFile(path: string): Promise<string> {
+    const filePath = pa.resolve(path)
+
     try {
         await fs.access(filePath)
     } catch {
-        throw new Error(`Datei nicht gefunden: ${file}`)
+        throw new Error(`Datei nicht gefunden: ${path}`)
     }
-    
-   return await fs.readFile(filePath, 'utf-8')
+
+    return await fs.readFile(filePath, 'utf-8')
 }
 
-export async function readFileLines(file: string): Promise<string[]> {
-    return (await fs.readFile(file, 'utf-8')).split('\n')
+export async function readFileLines(path: string): Promise<string[]> {
+    return (await fs.readFile(path, 'utf-8')).split('\n')
 }
 
-export async function addToFile(file: string, content: string): Promise<boolean> {
+export async function addToFile(path: string, content: string): Promise<boolean> {
     try{
-        const stats = await fs.stat(file).catch(() => null)
+        const stats = await fs.stat(path).catch(() => null)
         const isEmpty = !stats || stats.size === 0
-        await fs.appendFile(file, isEmpty ? content : `\n${content}`, 'utf-8')
+        await fs.appendFile(path, isEmpty ? content : `\n${content}`, 'utf-8')
         return true
     }catch(e){
-        console.error(`Fehler beim Hinzufügen des Inhalts zu der Datei: '${file}': ${e}`)
+        console.error(`Fehler beim Hinzufügen des Inhalts zu der Datei: '${path}': ${e}`)
         return false
     }
 }
 
-export async function fileExist(file: string): Promise<boolean> {
+export async function fileExist(path: string): Promise<boolean> {
     try {
-        await fs.access(file)
+        await fs.access(path)
         return true
     } catch {
         return false
     }
 }
 
-export async function removeFile(file: string): Promise<boolean> {
+export async function removeFile(path: string): Promise<boolean> {
     try {
-        await fs.unlink(file)
+        await fs.unlink(path)
         return true
     } catch(e) {
-        console.error(`Fehler beim Löschen der Datei: '${file}': ${e}`)
+        console.error(`Fehler beim Löschen der Datei: '${path}': ${e}`)
         return false
     }
 }
 
-export async function appendFile(file: string,data: string): Promise<boolean>{
+export async function appendFile(path: string,data: string): Promise<boolean>{
     try{
-        await fs.appendFile(file,data)
+        await fs.appendFile(path,data)
         return true
     }catch(e){
-        console.error(`Fehler beim data hinzufügen zur File ${file}: ${e}`)
+        console.error(`Fehler beim data hinzufügen zur File ${path}: ${e}`)
         return false
     }
 }
 
 export async function copyFile(source: string,destination: string): Promise<boolean>{
     try{
-        await fs.mkdir(path.dirname(destination), { recursive: true })
+        await fs.mkdir(pa.dirname(destination), { recursive: true })
         await fs.copyFile(source,destination)
         return true
     }catch(e){
@@ -106,7 +95,7 @@ export async function copyFile(source: string,destination: string): Promise<bool
 
 export async function copyDir(source: string,destination: string): Promise<boolean>{
     try{
-        await fs.cp(source,destination)
+        await fs.cp(source,destination,{ recursive: true })
         return true
     }catch(e){
         console.error(`Fehler beim kopieren von dir ${source} zu destination ${destination}: ${e}`)
@@ -148,14 +137,15 @@ export interface DirFile {
 }
 
 export async function readDir(dir: string): Promise<DirFile[]> {
-    const dirPath = path.isAbsolute(dir) ? dir : path.join(getProjectRoot(), dir)
+    const dirPath = pa.resolve(dir)
+    if(!(await dirExists(dirPath))) throw new Error(`Ordner nicht gefunden: ${dir}`)
     const files: DirFile[] = []
     
     async function _readDir(currentPath: string) {
         const entries = await fs.readdir(currentPath, { withFileTypes: true })
         
         for (const entry of entries) {
-            const fullPath = path.join(currentPath, entry.name)
+            const fullPath = pa.join(currentPath, entry.name)
             
             if (entry.isFile()) {
                 const content = await fs.readFile(fullPath, 'utf-8')
@@ -250,7 +240,12 @@ export class FilePath<S extends string = string> {
         await this.ready
     }
 
-    public async overwrite(content:string): Promise<boolean> {
+    /**
+     * Überschreibt die Datei komplett mit dem neuen content
+     * @param content 
+     * @returns 
+     */
+    public async overwrite(content:string){
         await this.__init()
         try{
             await fs.writeFile(this.path, content, 'utf-8')
@@ -277,14 +272,20 @@ export class FilePath<S extends string = string> {
     }
 
     public async remove(content:string){
-        await this.__init()
-        const fileContent = await this.read()
-        await removeFile(this.path)
-        await createFile(this.path,fileContent.replace(content,""))
+        try{
+            await this.__init()
+            const fileContent = await this.read()
+            await removeFile(this.path)
+            await createFile(this.path,fileContent.replace(content,""))
+            return true
+        } catch(e){
+            console.log(`Error beim Content entfernen der Datei ${this.path}: ${e}`)
+            return false
+        }
     }
 
     public async delete(){
-        await this.__init()
+        await this.ready   // nur ein laufendes Anlegen abwarten, NICHT neu anlegen
         const removed = await removeFile(this.path)
         this.ready = null
         return removed
@@ -322,6 +323,8 @@ export class FilePath<S extends string = string> {
 
     public async move(newPath:string){
         await this.__init()
+        // Ziel == Quelle: nichts zu tun, sonst wuerde delete() die Datei entfernen
+        if(pa.resolve(this.path) === pa.resolve(newPath)) return true
         // nur loeschen, wenn die Kopie wirklich steht - sonst ist die Datei weg
         if(!(await this.copy(newPath))) return false
         await this.delete()
@@ -336,7 +339,7 @@ export class FilePath<S extends string = string> {
      * conventiert den Datein-typ zu einem js-objekt.
      * unterstütze daten-typen = json,csv,yaml
      */
-    public async convert(): Promise<any> {
+    public async convert(){
         await this.__init()
         switch(this.dataType){
             case "json":{
@@ -428,7 +431,7 @@ export class FilePath<S extends string = string> {
                 return parseBlock(0, lines[0].search(/\S/))[0]
             }
             default:
-                return null
+                throw new Error(`Error beim conventieren der datei: ${this.path}`)
         }
     }
 }
@@ -438,5 +441,7 @@ export class DirPath {
 
     }
 }
+
+
 
 
