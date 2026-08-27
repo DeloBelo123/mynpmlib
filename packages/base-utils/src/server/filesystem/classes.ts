@@ -63,14 +63,14 @@ function toFileContent(value: unknown): string {
  *
  * @example
  * ```ts
- * const src = new DirPath("src/app")
- * const route = src.file("api/users/route.ts")  // FilePath, garantiert innerhalb
+ * const src = new Directory("src/app")
+ * const route = src.file("api/users/route.ts")  // File, garantiert innerhalb
  * await route.overwrite("export function GET(){}")
  *
  * const pfade = (await src.read({ recursive: true })).map(f => f.path)
  * ```
  */
-export class DirPath {
+export class Directory {
     /** Name des Ordners, also das letzte Pfad-Segment */
     public name: string
     /** der Pfad, wie er übergeben wurde */
@@ -87,7 +87,7 @@ export class DirPath {
      * @param path Pfad zum Ordner, relativ zum Arbeitsverzeichnis
      * @example
      * ```ts
-     * const src = new DirPath("src/app")
+     * const src = new Directory("src/app")
      * ```
      */
     constructor(path:string){
@@ -122,7 +122,7 @@ export class DirPath {
      *
      * Rein textuell: `..` ist nach dem Auflösen bereits verrechnet und wird
      * damit abgefangen. Symlinks sieht diese Prüfung nicht - dafür gibt es
-     * {@link DirPath.resolveReal}.
+     * {@link Directory.resolveReal}.
      *
      * @param subpath Pfad relativ zum Ordner, leer meint den Ordner selbst
      * @returns der absolute Pfad innerhalb des Ordners
@@ -143,7 +143,7 @@ export class DirPath {
     }
 
     /**
-     * Wie {@link DirPath.resolve}, löst zusätzlich Symlinks auf.
+     * Wie {@link Directory.resolve}, löst zusätzlich Symlinks auf.
      *
      * Ein Symlink innerhalb des Ordners, der nach draußen zeigt, besteht die
      * rein textuelle Prüfung - erst der echte Pfad verrät ihn. Existiert das
@@ -174,45 +174,45 @@ export class DirPath {
     /* ---------- Fabrik ---------- */
 
     /**
-     * Gibt einen {@link FilePath} auf eine Datei innerhalb dieses Ordners.
+     * Gibt einen {@link File} auf eine Datei innerhalb dieses Ordners.
      *
      * Geprüft wird hier nur textuell, weil die Methode synchron ist; die
      * Symlink-Prüfung greift beim ersten echten Zugriff des zurückgegebenen
      * Objekts.
      *
      * @param subpath Pfad relativ zum Ordner, z.B. "api/users/route.ts"
-     * @returns ein FilePath, der den Ordner nicht verlässt
+     * @returns ein File, der den Ordner nicht verlässt
      * @throws {FsError} wenn der Pfad außerhalb liegt oder auf den Ordner selbst zeigt
      * @example
      * ```ts
-     * const configs = new DirPath("configs")
+     * const configs = new Directory("configs")
      * await configs.file("db.json").overwrite('{"port":5432}')
      * ```
      */
-    public file(subpath: string): FilePath {
+    public file(subpath: string): File {
         const target = this.resolve(subpath)
         if(target === this.resolve()){
             throw new FsError("file", subpath, "Pfad zeigt auf den Ordner selbst, nicht auf eine Datei")
         }
-        return new FilePath(target)
+        return new File(target)
     }
 
     /**
-     * Gibt einen {@link DirPath} auf einen Unterordner.
+     * Gibt einen {@link Directory} auf einen Unterordner.
      *
      * Die Sandbox wird dabei enger, nie weiter - ein Unterordner bleibt im
      * ursprünglichen Ordner gefangen.
      *
      * @param subpath Pfad relativ zum Ordner
-     * @returns ein DirPath auf den Unterordner
+     * @returns ein Directory auf den Unterordner
      * @throws {FsError} wenn der Pfad außerhalb liegt
      * @example
      * ```ts
-     * const lib = new DirPath("src").dir("lib")
+     * const lib = new Directory("src").dir("lib")
      * ```
      */
-    public dir(subpath: string): DirPath {
-        return new DirPath(this.resolve(subpath))
+    public dir(subpath: string): Directory {
+        return new Directory(this.resolve(subpath))
     }
 
     /* ---------- Lesen ---------- */
@@ -253,7 +253,7 @@ export class DirPath {
     }
 
     /**
-     * Wie {@link DirPath.read}, lädt aber keine Inhalte - nur die Pfade.
+     * Wie {@link Directory.read}, lädt aber keine Inhalte - nur die Pfade.
      *
      * Bei grossen Ordnern die richtige Wahl, weil nichts in den Speicher
      * geladen wird.
@@ -278,21 +278,21 @@ export class DirPath {
     }
 
     /**
-     * Gibt jede enthaltene Datei als {@link FilePath} zurück.
+     * Gibt jede enthaltene Datei als {@link File} zurück.
      *
      * Dabei wird nichts gelesen - nur die Pfadliste geholt. Der Inhalt wird
      * erst geladen, wenn du eine der Dateien anfasst.
      *
      * @param subpath Unterordner, oder direkt die Optionen
      * @param options `recursive` und `ignore`
-     * @returns ein FilePath pro enthaltener Datei
+     * @returns ein File pro enthaltener Datei
      * @throws {FsError} wenn der Pfad außerhalb liegt oder kein Ordner ist
      * @example
      * ```ts
      * for(const f of await dir.files({ recursive: true })) await f.add("// geprüft")
      * ```
      */
-    public async files(subpath?: string | DirReadOptions, options: DirReadOptions = {}): Promise<FilePath[]> {
+    public async files(subpath?: string | DirReadOptions, options: DirReadOptions = {}): Promise<File[]> {
         const [sub, opts] = dirArgs(subpath, options)
         const base = sub ?? ""
         return (await this.list(sub, opts)).map(rel => this.file(pa.join(base, rel)))
@@ -333,7 +333,7 @@ export class DirPath {
      * erhöhen. Die Ergebnisse behalten in jedem Fall die Reihenfolge der
      * Dateien.
      *
-     * @param fn bekommt jede Datei als FilePath und ihren relativen Pfad
+     * @param fn bekommt jede Datei als File und ihren relativen Pfad
      * @param options `recursive`, `ignore` und `concurrency` (Standard 1)
      * @returns die Rückgabewerte von `fn`, in der Reihenfolge der Dateien
      * @throws {FsError} wenn der Ordner nicht gelesen werden kann; Fehler aus
@@ -345,7 +345,7 @@ export class DirPath {
      * ```
      */
     public async each<T>(
-        fn: (file: FilePath, relPath: string) => T | Promise<T>,
+        fn: (file: File, relPath: string) => T | Promise<T>,
         options: DirReadOptions = {},
     ): Promise<T[]> {
         const relPaths = await this.list(undefined, options)
@@ -480,7 +480,7 @@ export class DirPath {
      * @throws {FsError} bei Rechteproblemen
      * @example
      * ```ts
-     * await new DirPath("build").delete()
+     * await new Directory("build").delete()
      * ```
      */
     public async delete(): Promise<void> {
@@ -498,10 +498,10 @@ export class DirPath {
      * @throws {FsError} bei Rechteproblemen
      * @example
      * ```ts
-     * await new DirPath("dist").empty()   // vor dem nächsten Build
+     * await new Directory("dist").toEmpty()   // vor dem nächsten Build
      * ```
      */
-    public async empty(): Promise<void> {
+    public async toEmpty(): Promise<void> {
         await this.__init()
         const root = this.resolve()
         const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => null)
@@ -527,7 +527,7 @@ export class DirPath {
      * @throws {FsError} wenn nicht kopiert werden kann
      * @example
      * ```ts
-     * await new DirPath("src").copy("backup/src")
+     * await new Directory("src").copy("backup/src")
      * ```
      */
     public async copy(destination: string, options: { overwrite?: boolean } = {}): Promise<void> {
@@ -541,23 +541,23 @@ export class DirPath {
  *
  * Die Datei wird beim ersten Zugriff angelegt - samt aller fehlenden Ordner im
  * Pfad. Der Konstruktor selbst fasst das Dateisystem nicht an. Ein frischer
- * FilePath liefert also `""` statt zu werfen.
+ * File liefert also `""` statt zu werfen.
  *
  * Der Pfad **muss eine Dateiendung haben**. Das prüft schon der Compiler, nicht
- * erst die Laufzeit. Aus der Endung ergibt sich {@link FilePath.dataType}, und
- * damit weiß {@link FilePath.convert}, wie der Inhalt zu lesen ist - unterstützt
+ * erst die Laufzeit. Aus der Endung ergibt sich {@link File.dataType}, und
+ * damit weiß {@link File.convert}, wie der Inhalt zu lesen ist - unterstützt
  * werden `json`, `csv` und `yaml`/`yml`.
  *
  * Schreibende Methoden geben nichts zurück: Erfolg heißt "läuft durch",
  * Misserfolg heißt {@link FsError}.
  *
  * Soll die Datei garantiert innerhalb eines bestimmten Ordners liegen, erzeuge
- * sie über {@link DirPath.file} statt direkt.
+ * sie über {@link Directory.file} statt direkt.
  *
  * @typeParam S - der Pfad als String-Literal, damit die Endung prüfbar ist
  * @example
  * ```ts
- * const cfg = new FilePath("configs/app.json")
+ * const cfg = new File("configs/app.json")
  * try {
  *     await cfg.overwrite('{"port":3000}')
  *     await cfg.update(text => ({ ...JSON.parse(text), port: 8080 }))
@@ -567,11 +567,11 @@ export class DirPath {
  *     throw e
  * }
  *
- * new FilePath("configs/app")                    // Compilerfehler: keine Endung
+ * new File("configs/app")                    // Compilerfehler: keine Endung
  * ```
  */
-export class FilePath<S extends string = string> {
-    /** aus der Endung abgeleiteter Datentyp - steuert {@link FilePath.convert} */
+export class File<S extends string = string> {
+    /** aus der Endung abgeleiteter Datentyp - steuert {@link File.convert} */
     public dataType: "json" | "csv" | "yaml" | "none"
     /** der Pfad, wie er übergeben wurde */
     public path: string
@@ -589,12 +589,12 @@ export class FilePath<S extends string = string> {
      * @param path Pfad zur Datei, relativ zum Arbeitsverzeichnis
      * @example
      * ```ts
-     * const cfg = new FilePath("configs/app.json")
+     * const cfg = new File("configs/app.json")
      * ```
      */
     constructor(path: S & FilePathInput<S>){
         this.path = path
-        const parsed = FilePath.parse(path)
+        const parsed = File.parse(path)
         this.name = parsed.name
         this.dataType = parsed.dataType
         this.ready = null
@@ -603,14 +603,14 @@ export class FilePath<S extends string = string> {
     /**
      * Liest Name und Datentyp aus einem Pfad.
      *
-     * Wird vom Konstruktor **und** von {@link FilePath.move} benutzt, damit
+     * Wird vom Konstruktor **und** von {@link File.move} benutzt, damit
      * beide dieselbe Logik verwenden.
      *
      * @param path der zu zerlegende Pfad
      * @returns Dateiname und erkannter Datentyp
      * @example
      * ```ts
-     * FilePath.parse("a/b/app.json")   // { name: "app.json", dataType: "json" }
+     * File.parse("a/b/app.json")   // { name: "app.json", dataType: "json" }
      * ```
      */
     private static parse(path: string){
@@ -661,7 +661,7 @@ export class FilePath<S extends string = string> {
      * @throws {FsError} wenn nicht geschrieben werden kann
      * @example
      * ```ts
-     * await new FilePath("app.json").overwrite('{"port":3000}')
+     * await new File("app.json").overwrite('{"port":3000}')
      * ```
      */
     public async overwrite(content: string): Promise<void> {
@@ -682,14 +682,16 @@ export class FilePath<S extends string = string> {
      * Liest den kompletten Inhalt der Datei als String.
      *
      * Die Datei wird beim ersten Zugriff automatisch angelegt, ein frischer
-     * FilePath liefert also `""` statt zu werfen.
+     * File liefert also `""` statt zu werfen, ausser der pfad exestiert schon
+     * mit einer Datei dann wird dessen inhalt gegeben!
      *
      * @param options `maxSize` begrenzt die Dateigrösse in Bytes
      * @returns der Dateiinhalt
      * @throws {FsError} wenn die Datei nicht gelesen werden kann oder zu gross ist
      * @example
      * ```ts
-     * const text = await new FilePath("notes.txt").content()
+     * const file = new File("notes.txt")
+     * const content = await file.content()
      * ```
      */
     public async content({ maxSize = MAX_FILE_SIZE }: { maxSize?: number } = {}): Promise<string> {
@@ -724,7 +726,7 @@ export class FilePath<S extends string = string> {
      * @throws {FsError} wenn nicht geschrieben werden kann
      * @example
      * ```ts
-     * const log = new FilePath("app.log")
+     * const log = new File("app.log")
      * await log.add("Server gestartet")
      * ```
      */
@@ -738,7 +740,7 @@ export class FilePath<S extends string = string> {
      *
      * Gesucht wird wörtlich, nicht als regulärer Ausdruck. Kommt der Text nicht
      * vor, bleibt die Datei unverändert. Geschrieben wird atomar über
-     * {@link FilePath.overwrite}.
+     * {@link File.overwrite}.
      *
      * @param content der zu entfernende Text
      * @throws {FsError} wenn nicht gelesen oder geschrieben werden kann
@@ -761,7 +763,7 @@ export class FilePath<S extends string = string> {
      * @throws {FsError} bei Rechteproblemen
      * @example
      * ```ts
-     * await new FilePath("tmp/cache.json").delete()
+     * await new File("tmp/cache.json").delete()
      * ```
      */
     public async delete(): Promise<void> {
@@ -876,7 +878,7 @@ export class FilePath<S extends string = string> {
      * @throws {FsError} `EEXIST` wenn das Ziel existiert und `overwrite` false ist
      * @example
      * ```ts
-     * const f = new FilePath("daten.json")
+     * const f = new File("daten.json")
      * await f.move("archiv/daten.json")
      * ```
      */
@@ -908,7 +910,7 @@ export class FilePath<S extends string = string> {
         }
 
         this.path = ziel
-        const parsed = FilePath.parse(ziel)
+        const parsed = File.parse(ziel)
         this.name = parsed.name
         this.dataType = parsed.dataType
         this.ready = null
@@ -918,7 +920,7 @@ export class FilePath<S extends string = string> {
      * Konvertiert den Dateiinhalt anhand der Endung in ein JS-Objekt.
      *
      * Unterstützt `json`, `csv` und `yaml`/`yml` - siehe
-     * {@link FilePath.dataType}. Eine leere Datei ergibt bei allen drei
+     * {@link File.dataType}. Eine leere Datei ergibt bei allen drei
      * Formaten `{}`. Ein BOM am Dateianfang wird entfernt.
      *
      * **JSON** gibt den geparsten Wert zurück - auch ein blosses `42` oder
@@ -944,7 +946,7 @@ export class FilePath<S extends string = string> {
      *         geparst werden kann - mit Format und Zeilennummer in der Meldung
      * @example
      * ```ts
-     * const cfg = await new FilePath("config.json").convert<{ port: number }>()
+     * const cfg = await new File("config.json").convert<{ port: number }>()
      * ```
      */
     public async convert<T = unknown>(): Promise<T> {
@@ -1350,3 +1352,4 @@ export class FilePath<S extends string = string> {
         }
     }
 }
+
