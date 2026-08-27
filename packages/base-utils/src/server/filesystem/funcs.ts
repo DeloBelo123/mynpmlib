@@ -133,6 +133,95 @@ export async function addToFile(path: string, content: string): Promise<void> {
 }
 
 /**
+ * Macht aus einem beliebigen Wert den Text, der in die Datei soll.
+ *
+ * Strings bleiben wie sie sind, `null` leert die Datei, alles andere wird zu
+ * lesbarem JSON. Werte, die sich nicht serialisieren lassen (Funktionen,
+ * Symbole, zirkuläre Objekte), werfen - lieber ein klarer Fehler als Müll
+ * wie `"Symbol()"` in der Datei.
+ *
+ * @param value der zu schreibende Wert
+ * @returns der Text für die Datei
+ * @throws {TypeError} wenn sich der Wert nicht serialisieren lässt
+ * @example
+ * ```ts
+ * const text = toFileContent({ a: 1 })
+ * ```
+ */
+export function toFileContent(value: unknown): string {
+    if(typeof value === "string") return value
+    if(value === null) return ""
+    const json = JSON.stringify(value, null, 2)
+    if(json === undefined){
+        throw new TypeError(`Wert vom Typ '${typeof value}' lässt sich nicht in eine Datei schreiben`)
+    }
+    return json
+}
+
+/**
+ * Überschreibt eine Datei komplett - atomar.
+ *
+ * Geschrieben wird zuerst in eine Nebendatei, die anschließend per Rename an
+ * die Stelle der Originaldatei tritt. Rename ist auf demselben Dateisystem
+ * atomar - es gibt also keinen Moment, in dem die Datei leer oder halb
+ * geschrieben auf der Platte liegt. Bricht der Vorgang ab, bleibt das Original
+ * unangetastet und die Nebendatei wird aufgeräumt.
+ *
+ * @param path Pfad zur Datei
+ * @param content der neue Inhalt
+ * @param op Name der Operation für {@link FsError.op} - damit ein Aufrufer,
+ *        der diese Funktion nur intern nutzt, seinen eigenen Namen melden kann
+ * @throws {FsError} wenn nicht geschrieben werden kann
+ * @example
+ * ```ts
+ * await overwriteFile("app.json", '{"port":3000}')
+ * ```
+ */
+export async function overwriteFile(path: string, content: string, op: string = "overwriteFile"): Promise<void> {
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
+    try{
+        await fs.writeFile(tmp, content, 'utf-8')
+        const stats = await fs.stat(path).catch(() => null)
+        if(stats) await fs.chmod(tmp, stats.mode)     // Rechte des Originals erhalten
+        await fs.rename(tmp, path)
+    }catch(e){
+        await fs.rm(tmp, { force: true }).catch(() => {})
+        throw new FsError(op, path, "Fehler beim Überschreiben der Datei", e)
+    }
+}
+
+/**
+ * Liest, verändert und speichert eine Datei in einem Schritt.
+ *
+ * Gibt `func` einen String zurück, wird der unverändert geschrieben. `null`
+ * leert die Datei. Alles andere landet als eingerücktes JSON darin. Geschrieben
+ * wird erst nach `func` und atomar - wirft `func`, bleibt die Datei
+ * unangetastet.
+ *
+ * Gibt `func` **`undefined`** zurück, wirft die Funktion. Das ist fast immer
+ * ein vergessenes `return` im Callback, und würde die Datei sonst still leeren.
+ *
+ * @param path Pfad zur Datei
+ * @param func bekommt den aktuellen Inhalt, gibt den neuen zurück
+ * @throws {FsError} wenn die Datei fehlt, `func` `undefined` liefert oder nicht
+ *         geschrieben werden kann; Fehler aus `func` werden durchgereicht
+ * @example
+ * ```ts
+ * await editFile("app.log", text => text.toUpperCase())
+ * await editFile("app.json", text => ({ ...JSON.parse(text), version: 2 }))
+ * ```
+ */
+export async function editFile(path: string, func: (fileContent: string) => any): Promise<void> {
+    const fileContent = await readFile(path)
+    const neu = await func(fileContent)
+    if(neu === undefined){
+        throw new FsError("editFile", path,
+            "Callback hat undefined zurückgegeben - Datei bleibt unverändert (fehlt ein return?)")
+    }
+    await overwriteFile(path, toFileContent(neu))
+}
+
+/**
  * Prüft, ob ein Pfad existiert.
  *
  * Antwortet auch für Ordner mit `true` - für "ist es wirklich eine Datei"

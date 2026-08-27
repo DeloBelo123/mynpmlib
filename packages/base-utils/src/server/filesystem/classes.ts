@@ -16,8 +16,10 @@ import {
     listDir,
     readDir,
     readFile,
+    overwriteFile,
     readFileLines,
     removeFile,
+    toFileContent,
 } from './funcs.js'
 
 /**
@@ -26,24 +28,6 @@ import {
  */
 function dirArgs(subpath?: string | DirReadOptions, options: DirReadOptions = {}): [string | undefined, DirReadOptions] {
     return typeof subpath === "object" && subpath !== null ? [undefined, subpath] : [subpath, options]
-}
-
-/**
- * Macht aus einem beliebigen Rückgabewert den Text, der in die Datei soll.
- *
- * Strings bleiben wie sie sind, `null` leert die Datei, alles andere wird zu
- * lesbarem JSON. Werte, die sich nicht serialisieren lassen (Funktionen,
- * Symbole, zirkuläre Objekte), werfen - lieber ein klarer Fehler als Müll
- * wie `"Symbol()"` in der Datei.
- */
-function toFileContent(value: unknown): string {
-    if(typeof value === "string") return value
-    if(value === null) return ""
-    const json = JSON.stringify(value, null, 2)
-    if(json === undefined){
-        throw new TypeError(`Wert vom Typ '${typeof value}' lässt sich nicht in eine Datei schreiben`)
-    }
-    return json
 }
 
 /**
@@ -666,16 +650,7 @@ export class File<S extends string = string> {
      */
     public async overwrite(content: string): Promise<void> {
         await this.__init()
-        const tmp = `${this.path}.${process.pid}.${Date.now()}.tmp`
-        try{
-            await fs.writeFile(tmp, content, 'utf-8')
-            const stats = await fs.stat(this.path).catch(() => null)
-            if(stats) await fs.chmod(tmp, stats.mode)     // Rechte des Originals erhalten
-            await fs.rename(tmp, this.path)
-        }catch(e){
-            await fs.rm(tmp, { force: true }).catch(() => {})
-            throw new FsError("overwrite", this.path, "Fehler beim Überschreiben der Datei", e)
-        }
+        await overwriteFile(this.path, content, "overwrite")
     }
 
     /**

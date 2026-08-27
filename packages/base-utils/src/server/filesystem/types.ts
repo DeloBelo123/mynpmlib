@@ -63,7 +63,7 @@ export interface DirReadOptions {
      */
     ignore?: (string | RegExp)[]
     /**
-     * Wie viele Dateien {@link DirPath.each} gleichzeitig verarbeitet.
+     * Wie viele Dateien {@link Directory.each} gleichzeitig verarbeitet.
      * Standard 1, also streng nacheinander.
      */
     concurrency?: number
@@ -89,10 +89,11 @@ export type HasFileExtension<S extends string> =
                     : false
 
 /**
- * Input-Typ für new FilePath: erzwingt eine Endung im letzten Segment.
+ * Input-Typ für new File: erzwingt eine Endung im letzten Segment.
  * Bei einem Pfad ohne Endung steht die Erklärung direkt im TS-Fehler.
  */
 export type FilePathInput<S extends string> =
     HasFileExtension<S> extends true
         ? unknown
-        : { __error: `'${S}' hat keine Dateiendung - ein FilePath braucht z.B. '${S}.json'` }
+        : { __error: `'${S}' hat keine Dateiendung - ein File braucht z.B. '${S}.json'` }
+
