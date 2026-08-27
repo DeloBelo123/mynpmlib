@@ -1,5 +1,6 @@
 import * as readline from 'readline';
 import { exec, spawn } from 'child_process';
+import { safe } from '../safe.js';
 
 export function input(prompt: string = ''): Promise<string> {
     const rl = readline.createInterface({
@@ -43,12 +44,9 @@ export const terminal = {
     },
 
     exists: async function(command:string):Promise<boolean>{
-        try {
-            await this.exec(`command -v ${command}`);
-            return true;
-          } catch {
-            return false;
-          }
+        const [_, error] = await safe(this.exec(`command -v ${command}`))
+        if(error) return false
+        else return true
     }
 }
 
