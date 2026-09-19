@@ -73,9 +73,9 @@ export function getLLM(config: OpenRouterFreeLLMConfig): Promise<FreeOpenRouterL
  *
  * default llm for local: "nvidia/nemotron-3-nano-4b"
  *
- * provider "claude-cli": nutzt die eingeloggte `claude -p` CLI als reines LLM (Default-Model "claude-opus-4-8")
+ * `from: "claude-cli"`: nutzt die eingeloggte `claude -p` CLI als reines LLM (Default-Model "claude-opus-4-8")
  *
- * provider "codex-cli": nutzt `codex exec` als reines LLM (Default-Model "gpt-5.5"; CLI muss installiert sein)
+ * `from: "codex-cli"`: nutzt `codex exec` als reines LLM (Default-Model "gpt-5.5"; CLI muss installiert sein)
  *
  * `config: { temperature, reasoning }` gibt es bei JEDEM Provider (auch bei `free: true`
  * und den CLIs). `temperature` ignorieren die CLIs, `reasoning` ignoriert chatgroq —
@@ -91,7 +91,7 @@ export function getLLM(
     | CodexCLILLMConfig
 ): GroqLLM | OpenAILLM | OpenRouterLLM | LocalLLM | ClaudeCLI_LLM | CodexCLI_LLM
 export function getLLM(config: LLMConfig) {
-  switch (config.provider) {
+  switch (config.from) {
     case "chatgroq": {
       const llm: GroqLLM = new ChatGroq({
         apiKey: config.apikey ?? process.env.CHATGROQ_API_KEY,
@@ -187,8 +187,6 @@ export function getLLM(config: LLMConfig) {
       throw new Error("Unknown LLM provider");
   }
 }
-
-
 
 
 

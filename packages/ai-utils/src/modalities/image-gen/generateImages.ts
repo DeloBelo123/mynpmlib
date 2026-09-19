@@ -39,7 +39,7 @@ type ImageGenOptions = {
  *
  * Internally this function calls OpenRouter through the chat-completions-compatible
  * interface with `modalities` and optional `image_config`. If no `llm` is provided,
- * it creates one with `getLLM({ provider: "openrouter", model: "google/gemini-3.1-flash-image-preview" })` and
+ * it creates one with `getLLM({ from: "openrouter", model: "google/gemini-3.1-flash-image-preview" })` and
  * reads `process.env.OPENROUTER_API_KEY`.
  *
  * Make sure `OPENROUTER_API_KEY` is set in your `.env`.
@@ -55,7 +55,7 @@ type ImageGenOptions = {
  * CONFIG:
  * ```ts
  * generateImages({
- *     llm = getLLM({ provider: "openrouter", model: "google/gemini-3.1-flash-image-preview" }),
+ *     llm = getLLM({ from: "openrouter", model: "google/gemini-3.1-flash-image-preview" }),
  *     modalities = ["image", "text"],
  *     imageConfig = { aspect_ratio: "1:1", image_size: "2K" },
  *     model,
@@ -74,7 +74,7 @@ type ImageGenOptions = {
  * ```
  */
 export async function generateImages({
-    llm = getLLM({ provider: "openrouter", model: DEFAULT_IMAGE_GEN_MODEL }),
+    llm = getLLM({ from: "openrouter", model: DEFAULT_IMAGE_GEN_MODEL }),
     modalities = ["image", "text"],
     imageConfig = { aspect_ratio: "1:1", image_size: "2K" },
     model,
@@ -84,7 +84,7 @@ export async function generateImages({
     const runtimeLLM =
         model && model !== runtime.model
             ? getLLM({
-                  provider: "openrouter",
+                  from: "openrouter",
                   model,
                   apikey: runtime.apiKey
               })
@@ -104,4 +104,3 @@ export async function generateImages({
         raw: response
     }
 }
-

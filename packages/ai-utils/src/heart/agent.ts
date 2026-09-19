@@ -55,7 +55,7 @@ interface AgentProps<T extends OutputSchema | undefined = undefined>{
  * @example
  * constructor({
         prompt = `Du bist ein hilfreicher Assistent.`,
-        llm = getLLM({ provider:"openrouter", model: "openai/gpt-5.6-luna"}),
+        llm = getLLM({ from:"openrouter", model: "openai/gpt-5.6-luna"}),
         tools,
         output,
         checkpointer,
@@ -94,7 +94,7 @@ export class Agent<T extends OutputSchema | undefined = undefined> {
 
     constructor({
         prompt = `Du bist ein hilfreicher Assistent.`,
-        llm = getLLM({ provider:"openrouter", model: "openai/gpt-5.6-luna"}),
+        llm = getLLM({ from:"openrouter", model: "openai/gpt-5.6-luna"}),
         tools,
         output,
         checkpointer,

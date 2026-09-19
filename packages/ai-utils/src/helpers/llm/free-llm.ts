@@ -379,7 +379,7 @@ export class FreeOpenRouterLLM extends ChatOpenAI {
   }
 }
 
-/** Async-Pfad von `getLLM({ provider: "openrouter", free: true })`. */
+/** Async-Pfad von `getLLM({ from: "openrouter", free: true })`. */
 export async function getFreeOpenRouterLLM(config: {
   apikey?: string
   dataSafe?: boolean

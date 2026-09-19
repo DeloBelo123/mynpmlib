@@ -3,10 +3,11 @@
 Ein praktisches Utility-Package für LLM-Apps mit LangChain:
 
 - `Chain`, `Agent`, `DeepAgent` (Filesystem, HITL, Sandboxes, Subagents)
+- `classify()` als schneller, typisierter JEV-Classifier über OpenRouter (Noul, Choice, Score)
 - Memory via Checkpoint-Saver (`MemorySaver`, `SmartCheckpointSaver`, `SupabaseCheckpointSaver`)
 - RAG-Helper (FAISS, Supabase, In-Memory)
-- Tooling (`ToolRegistry`, `CombinedToolRegistry`, `ZodiosToolRegistry`, `createRAGTool`, `tavilySearchTool`)
-- Magic-Funcs (Parser, Evaluator, Optimizer, Answerer)
+- Tooling (`ToolRegistry`, `createRAGTool`, `tavilySearchTool`, MCP-Server)
+- Magic-Funcs für Extraktion, Strukturierung, Umschreiben und Zusammenfassen
 - Modalities (Vision, Image Generation)
 
 ---
@@ -20,7 +21,8 @@ Im Package gilt als Standard-LLM-Default für die allgemeine Nutzung:
 
 Wenn du nichts explizit setzt, orientiere dich an diesem Default in deinen Aufrufen.
 
-Für kostenlose Modelle gibt es bei `provider: "openrouter"` die Option `free: true` — sie wählt dynamisch das beste aktuell kostenlose `:free`-Model (siehe Schnellstart).
+Für kostenlose Modelle gibt es bei `from: "openrouter"` die Option `free: true` —
+sie wählt dynamisch das beste aktuell kostenlose `:free`-Model (siehe Schnellstart).
 
 ---
 
@@ -54,8 +56,8 @@ SUPABASE_SERVICE_ROLE_KEY=...
 ### Welche Variable wofür?
 
 - `OPENROUTER_API_KEY`: OpenRouter-Modelle und Modalities
-- `CHATGROQ_API_KEY`: wenn du `provider: "chatgroq"` nutzt
-- `TAVILY_API_KEY`: `websearch()` / `tavilySearchTool`
+- `CHATGROQ_API_KEY`: wenn du `from: "chatgroq"` nutzt
+- `TAVILY_API_KEY`: `TavilySearch` / `tavilySearchTool`
 - Supabase-Variablen: für `createSupabaseVectoreStore()`, `getSupabaseVectorStore()` und `SupabaseCheckpointSaver`
 
 ---
@@ -65,55 +67,171 @@ SUPABASE_SERVICE_ROLE_KEY=...
 ```ts
 import { getLLM } from "@delofarag/ai-utils"
 
-const llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" })
+const llm = getLLM({ from: "openrouter", model: "openai/gpt-5.6-luna" })
 ```
 
 Beispiele:
 
 ```ts
-const llmOpenRouter = getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" })
-const llmGroq = getLLM({ provider: "chatgroq", model: "llama-3.3-70b-versatile" })
-const llmLocal = getLLM({ provider: "local", model: "llama3.2:3b" })
+const llmOpenRouter = getLLM({ from: "openrouter", model: "openai/gpt-5.6-luna" })
+const llmGroq = getLLM({ from: "chatgroq", model: "llama-3.3-70b-versatile" })
+const llmOpenAI = getLLM({ from: "openai", model: "gpt-5.6-luna" })
+const llmLocal = getLLM({ from: "local", model: "llama3.2:3b" })
+
+// Nutzt die lokal eingeloggten CLIs statt eines API-Keys:
+const llmClaudeCLI = getLLM({ from: "claude-cli", model: "claude-opus-4-8" })
+const llmCodexCLI = getLLM({ from: "codex-cli", model: "gpt-5.5" })
 ```
 
-Kostenloses Model (OpenRouter):
+Providerübergreifende Laufzeitoptionen:
 
 ```ts
-// free: true → getLLM wird async und wählt live das beste aktuell
-// kostenlose :free-Model mit Tool-Support. Doppel-Ranking: Intelligenz
-// (sort=intelligence-high-to-low) UND Latenz (sort=latency-low-to-high),
-// kombiniert per Rang-Summe — schlau, aber kein lahmer Reasoning-Brocken.
-// Kein model-Prop erlaubt.
-const llm = await getLLM({ provider: "openrouter", free: true })
-
-console.log(llm.model) // z.B. "openai/gpt-oss-120b:free"
+const llm = getLLM({
+    from: "openrouter",
+    model: "openai/gpt-5.6-luna",
+    config: {
+        temperature: 0.2,
+        reasoning: "high",
+    },
+})
 ```
 
-Verschwindet das gewählte Model später oder ist es nicht mehr gratis (400/402/403/404), heilt sich die Instanz selbst: nächstbestes `:free`-Model holen, `model` tauschen, Request transparent wiederholen.
-
-**Free-Limits & `FreeLimitError`:** OpenRouter begrenzt `:free`-Models account-weit auf 20 Requests/Minute und 50 Requests/Tag (bzw. 1000/Tag ab 10 gekauften Credits). Weil ein Model-Wechsel dagegen nicht hilft, wird bei 429 nicht geheilt, sondern ein typisierter `FreeLimitError` geworfen — sauber filterbar fürs Frontend:
-
-```ts
-import { FreeLimitError } from "@delofarag/ai-utils"
-
-try {
-    await llm.invoke(messages)
-} catch (e) {
-    if (e instanceof FreeLimitError && e.scope === "day") {
-        // e.code === "FREE_LIMIT_EXCEEDED" (überlebt auch JSON-Serialisierung)
-        // e.retryAfterSeconds → Sekunden bis zum Reset, falls der Server sie liefert
-        showToast("Sie haben Ihre Free-Requests für heute verbraucht.")
-    } else if (e instanceof FreeLimitError && e.scope === "minute") {
-        showToast("Kurz durchatmen — max. 20 Free-Requests pro Minute.")
-    }
-}
-```
+`reasoning` wird an OpenRouter, OpenAI, lokale OpenAI-kompatible Modelle und die
+CLI-Provider passend übersetzt. ChatGroq ignoriert diese Option. Die CLI-Provider
+ignorieren `temperature`.
 
 EU-Datenrouting (OpenRouter):
 
 ```ts
-getLLM({ provider: "openrouter", dataSafe: true })
+getLLM({ from: "openrouter", dataSafe: true })
 ```
+
+---
+
+## `classify()`: schneller, typisierter JEV-Classifier
+
+`classify()` ist für Klassifikation und Entscheidungen gedacht:
+Routing, Moderation, Relevanzprüfung, Priorisierung oder das Bewerten einer geordneten
+Skala. Anders als ein Chatmodell generiert JEV keinen freien Text. Du gibst einen
+`state` und benannte Fragen vor; zurück kommen ausschließlich typisierte Entscheidungen
+und Wahrscheinlichkeiten.
+
+Intern nutzt `classify()` das JEV-Modell über OpenRouters
+[Decisions API](https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-questions-and-answers-request)
+und standardmäßig [`~typesafe/jev-latest`](https://openrouter.ai/~typesafe/jev-latest).
+Der API-Key, die Base-URL und das Modell kommen aus `getLLM()` beziehungsweise aus
+`OPENROUTER_API_KEY`.
+
+### Die drei Classifier-Typen
+
+| Typ | Aufgabe | Wichtigste Ausgabe |
+|---|---|---|
+| `choice` | Eine Klasse aus deinen erlaubten Labels wählen | `choice`, `probabilities`, `confidence` |
+| `noul` | Binäre Aussage bewerten | `noul` als Ja-Wahrscheinlichkeit von `0` bis `1` |
+| `score` | Auf einer geordneten Skala klassifizieren | `score`, `probabilities`, `confidence`, `legend` |
+
+`score` ist ein Erwartungswert und kann zwischen zwei Stufen liegen, zum Beispiel
+`1.7`. `noul` hat kein separates `confidence`-Feld: Die Wahrscheinlichkeit selbst
+ist das Ergebnis.
+
+Weiterführende TypeSafe-Dokumentation:
+
+- [JEV Introduction](https://docs.typesafe.ai/introduction)
+- [System One Models](https://docs.typesafe.ai/concepts/system-one)
+- [Choice, Noul und Score](https://docs.typesafe.ai/primitives)
+- [Classification using confidence](https://docs.typesafe.ai/cookbooks/classification_using_confidence)
+
+### Klassifikationsbeispiel
+
+```ts
+import { classify } from "@delofarag/ai-utils"
+
+const result = await classify({
+    state: {
+        message: "I was charged twice. Please refund one charge urgently.",
+        customerTier: "business",
+    },
+    questions: {
+        category: {
+            type: "choice",
+            instructions: "Which team should handle `message`?",
+            criteria: {
+                billing: "Payments, invoices, charges, or refunds",
+                technical: "Bugs, outages, or integrations",
+                sales: "Pricing, upgrades, or new accounts",
+                other: null,
+            },
+        },
+        refundRequested: {
+            type: "noul",
+            instructions: "Does `message` explicitly request a refund?",
+        },
+        urgency: {
+            type: "score",
+            instructions: "How urgent is the request in `message`?",
+            criteria: ["Can wait", "Time-sensitive", "Immediately blocking"],
+        },
+    },
+})
+
+result.answers.category.choice
+// "billing" | "technical" | "sales" | "other"
+
+result.answers.category.probabilities.billing // number
+result.answers.refundRequested.noul            // 0..1
+result.answers.urgency.score                    // z.B. 1.7
+result.model                                    // tatsächlich verwendete Modellversion
+result.usage.cost                               // OpenRouter-Kosten, falls geliefert
+```
+
+Die Typen werden direkt aus `questions` abgeleitet. Ein nicht definiertes Label wie
+`result.answers.category.probabilities.legal` erzeugt deshalb bereits beim
+TypeScript-Check einen Fehler.
+
+### Eigenes Modell, Abbruch und Fehler
+
+Ein eigener, mit `getLLM()` gebauter OpenRouter-Client kann übergeben werden:
+
+```ts
+import { classify, getLLM } from "@delofarag/ai-utils"
+
+const llm = getLLM({ from: "openrouter", model: "typesafe/jev-1.13" })
+await classify({ llm, state: "...", questions: { /* ... */ } })
+```
+
+`signal` ist optional und dient ausschließlich zum Abbrechen des HTTP-Requests,
+zum Beispiel nach zehn Sekunden:
+
+```ts
+await classify({
+    state,
+    questions,
+    signal: AbortSignal.timeout(10_000),
+})
+```
+
+Ohne Timeout oder manuelles Canceln lässt du `signal` einfach weg. Nicht erfolgreiche
+OpenRouter-Antworten werden als `JevAPIError` mit `status` und `body` geworfen:
+
+```ts
+import { classify, JevAPIError } from "@delofarag/ai-utils"
+
+try {
+    await classify({ state, questions })
+} catch (error) {
+    if (error instanceof JevAPIError) {
+        console.error(error.status, error.body)
+    }
+}
+```
+
+### Gute Classifier-Fragen
+
+- Formuliere pro Frage genau eine schnelle Entscheidung.
+- Sende unabhängige Fragen über denselben `state` gemeinsam; JEV wertet sie parallel aus.
+- Verweise bei strukturiertem State explizit auf Felder wie `` `message` ``.
+- Ergänze bei `choice` ein `other`/`unknown`, wenn die Klassen nicht vollständig sind.
+- Lege produktive Schwellenwerte mit gelabelten Beispielen fest, statt blind `0.5` zu verwenden.
 
 ---
 
@@ -139,7 +257,7 @@ const productBriefSchema = z.object({
 })
 
 const chain = new Chain({
-    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" }),
+    llm: getLLM({ from: "openrouter", model: "openai/gpt-5.6-luna" }),
     prompt: "Du bist ein Product-Marketing-Assistent.",
     output: productBriefSchema
 })
@@ -199,7 +317,7 @@ const tools = new ToolRegistry([
 ]).allTools
 
 const agent = new Agent({
-    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" }),
+    llm: getLLM({ from: "openrouter", model: "openai/gpt-5.6-luna" }),
     prompt: "Du darfst Tools nutzen wenn nötig.",
     tools
 })
@@ -215,7 +333,7 @@ Conversation State läuft über Checkpoint-Saver + `thread_id`:
 import { Agent, MemorySaver, SmartCheckpointSaver, getLLM } from "@delofarag/ai-utils"
 
 const checkpointer = new SmartCheckpointSaver(new MemorySaver(), {
-    llm: getLLM({ provider: "openrouter" }),
+    llm: getLLM({ from: "openrouter" }),
     maxTokens: 24_000,
     keepLastMessages: 4
 })
@@ -263,6 +381,28 @@ const agent = new Agent({
 })
 ```
 
+### MCP-Tools
+
+`Agent` und `DeepAgent` können einen oder mehrere Remote-MCP-Server deklarativ
+anbinden. Die Verbindung wird pro `invoke()`/`stream()` geöffnet und anschließend
+automatisch geschlossen. Tool-Namen werden als `<server>__<tool>` präfixiert.
+
+```ts
+const agent = new Agent({
+    tools: [],
+    mcpServer: {
+        name: "crm",
+        url: process.env.CRM_MCP_URL!,
+        headers: { Authorization: `Bearer ${process.env.CRM_MCP_TOKEN}` },
+        description: "CRM-Daten für Kontakte, Firmen und Deals.",
+    },
+})
+```
+
+`description` am MCP-Server wird als Nutzungshinweis in den System-Prompt eingefügt.
+Die separate Agent-Prop `describe` ist dagegen nur beschreibende Metadaten für externe
+Tools und verändert den Agent-Prompt nicht.
+
 ### Streaming
 
 ```ts
@@ -270,6 +410,10 @@ for await (const chunk of agent.stream({ input: "Erkläre mir das.", thread_id: 
     process.stdout.write(chunk)
 }
 ```
+
+Mit `showReasoning: true` kann der Stream zusätzlich
+`{ kind: "reasoning", text }` liefern. Dafür muss Reasoning bereits am LLM aktiviert
+sein, zum Beispiel über `getLLM({ ..., config: { reasoning: "high" } })`.
 
 ---
 
@@ -290,6 +434,9 @@ LangChain Deep Agent (`createDeepAgent()`) als typisierte Wrapper-Klasse. Für a
 | **`checkpointer` + `thread_id`** | Conversation-State über Runs hinweg (Pflicht für HITL) |
 | **`invoke` / `stream`** | Gleiche API für Message **und** HITL-Resume via `decision` |
 | **`showToolCalls`** | Streamt `[tool:start]` / `[tool:end]` Events (nur `stream()`) |
+| **`showReasoning`** | Streamt Reasoning-Deltas, wenn das LLM Reasoning aktiviert hat |
+| **`showSubagents`** | Streamt Text-Deltas laufender Subagents |
+| **`mcpServer`** | Lädt Remote-MCP-Tools pro Aufruf und schließt die Verbindung automatisch |
 | **`agentsMd`** | AGENTS.md-Dateien als Startup-Kontext |
 | **`subagents`** | Delegation an spezialisierte Sub-Agents |
 | **`skills`** | Skill-Dateien vom Backend laden |
@@ -334,6 +481,8 @@ new DeepAgent({
     store,            // BaseStore — LangGraph Store
     name,             // Agent-Name
     contextSchema,    // Runtime-Context-Schema
+    mcpServer,        // MCPServerConfig | MCPServerConfig[]
+    describe,         // Metadaten für externe Tools; kein Prompt-Inhalt
 })
 ```
 
@@ -372,7 +521,7 @@ const tools = new ToolRegistry([
 ]).allTools
 
 const agent = new DeepAgent({
-    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" }),
+    llm: getLLM({ from: "openrouter", model: "openai/gpt-5.6-luna" }),
     prompt: "Du bist ein Coding Agent. Arbeite nur im Workspace.",
     tools,
     checkpointer: new MemorySaver(),
@@ -579,15 +728,17 @@ import {
 
 ---
 
-### `stream()` — Text, Interrupts und Tool-Events
+### `stream()` — Text, Interrupts, Tools, Reasoning und Subagents
 
-Gleiche Input-API wie `invoke()` — plus optionale Tool-Events:
+Gleiche Input-API wie `invoke()` — plus optionale Event-Typen:
 
 ```ts
 for await (const chunk of agent.stream({
     input: "Baue eine Website",
     thread_id: "u1",
     showToolCalls: true,
+    showReasoning: true,
+    showSubagents: true,
 })) {
     if (typeof chunk === "string") {
         process.stdout.write(chunk)
@@ -596,6 +747,10 @@ for await (const chunk of agent.stream({
         console.log("Decisions:", chunk.decisions)
     } else if (chunk.kind === "tool") {
         console.log(`[tool:${chunk.phase}]`, chunk.toolName)
+    } else if (chunk.kind === "reasoning") {
+        console.log("Reasoning:", chunk.text)
+    } else if (chunk.kind === "subagent") {
+        console.log("Subagent:", chunk.namespace, chunk.text)
     }
 }
 ```
@@ -608,6 +763,8 @@ for await (const chunk of agent.stream({
 | `DeepAgentInterrupt` | HITL-Pause | `{ kind: "interrupt", question, decisions, toolName?, args? }` |
 | `DeepAgentInterruptBatch` | Mehrere Tools gleichzeitig | `{ kind: "interrupt", items: [...] }` |
 | `DeepAgentToolEvent` | Mit `showToolCalls: true` | `{ kind: "tool", phase: "start"\|"end", toolName, args? }` |
+| `DeepAgentReasoningEvent` | Mit `showReasoning: true` | `{ kind: "reasoning", text }` |
+| `DeepAgentSubagentEvent` | Mit `showSubagents: true` | `{ kind: "subagent", text, namespace? }` |
 
 **Resume im Stream:**
 
@@ -622,7 +779,12 @@ for await (const chunk of agent.stream({
 Frontend ohne LangChain-Bundle:
 
 ```ts
-import { isInterrupt, isToolEvent } from "@delofarag/ai-utils/client"
+import {
+    isInterrupt,
+    isToolEvent,
+    isReasoningEvent,
+    isSubagentEvent,
+} from "@delofarag/ai-utils/client"
 ```
 
 ---
@@ -655,6 +817,35 @@ const agent = new DeepAgent({
 ```
 
 Pfade relativ zum Backend — der Agent kann Skills zur Laufzeit einlesen.
+
+---
+
+### MCP-Server
+
+Die gleiche `mcpServer`-Konfiguration wie beim normalen `Agent` funktioniert auch
+mit `DeepAgent`:
+
+```ts
+const agent = new DeepAgent({
+    tools: [],
+    mcpServer: [
+        {
+            name: "docs",
+            url: process.env.DOCS_MCP_URL!,
+            description: "Interne Produkt- und API-Dokumentation.",
+        },
+        {
+            name: "crm",
+            url: process.env.CRM_MCP_URL!,
+            headers: { Authorization: `Bearer ${process.env.CRM_MCP_TOKEN}` },
+            description: "Kontakte, Firmen und Deals.",
+        },
+    ],
+})
+```
+
+Bei aktivem MCP wird der interne Agent pro Aufruf neu gebaut, weil die zugehörigen
+MCP-Clients nach jedem Run geschlossen werden.
 
 ---
 
@@ -738,27 +929,6 @@ const weatherTool = registry.getTool("get_weather")
 const tools = registry.allTools
 ```
 
-### `CombinedToolRegistry` + `ZodiosToolRegistry`
-
-Kombiniert manuelle Tools mit einem Zodios-API-Client (max. 1 Client):
-
-```ts
-import { CombinedToolRegistry } from "@delofarag/ai-utils"
-import { Zodios } from "zodios"
-
-const registry = new CombinedToolRegistry([
-    {
-        name: "get_weather",
-        description: "Wetter abfragen",
-        schema: z.object({ city: z.string() }),
-        func: async ({ city }) => `${city}: sonnig`
-    },
-    myZodiosClient
-] as const)
-
-const agent = new Agent({ tools: registry.allTools })
-```
-
 ### Tavily
 
 ```ts
@@ -786,7 +956,7 @@ Thread-State wird über LangGraph Checkpoint-Saver an `Agent` / `DeepAgent` geh�
 import { MemorySaver, SmartCheckpointSaver, getLLM } from "@delofarag/ai-utils"
 
 const checkpointer = new SmartCheckpointSaver(new MemorySaver(), {
-    llm: getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" }),
+    llm: getLLM({ from: "openrouter", model: "openai/gpt-5.6-luna" }),
     maxTokens: 24_000,
     keepLastMessages: 4
 })
@@ -905,38 +1075,18 @@ Bei `SupabaseVectorStore` landet das Objekt im `filter`-Parameter der konfigurie
 
 ## Magic-Funcs
 
-### Answerers
-
-- `ask({ question, llm? })`
-- `websearch(query)` (braucht `TAVILY_API_KEY`)
-
-### Evaluators
-
-- `classify({ data, classes, context?, llm? })`
-- `decide({ material, kriteria_to_decide, llm? })`
-
-### Parsers
+Die aktuelle Magic-Func-API besteht aus vier kleinen Parser-/Transformationshelfern:
 
 - `extract({ data, schema, goal?, llm? })`
 - `structure({ data, into, retries?, llm? })`
-- `rewrite({ data, instruction, llm? })`
+- `rewrite({ data, instruction, retries?, llm? })`
 - `summarize({ data, fokuss?, maxWords?, llm? })`
-
-### Optimizers
-
-- `promptify({ request, agentRole?, llm? })`
-- `ragify({ data, llm? })`
 
 Beispiel:
 
 ```ts
-import { classify, extract, summarize } from "@delofarag/ai-utils"
+import { extract, rewrite, summarize } from "@delofarag/ai-utils"
 import { z } from "zod/v4"
-
-const sentiment = await classify({
-    data: "Das Produkt ist wirklich gut.",
-    classes: ["positiv", "negativ", "neutral"] as const
-})
 
 const person = await extract({
     data: "Max ist 30 und lebt in Berlin.",
@@ -947,11 +1097,19 @@ const person = await extract({
     })
 })
 
+const professional = await rewrite({
+    data: "hey, schick mal die rechnung",
+    instruction: "Formuliere als kurze professionelle E-Mail."
+})
+
 const short = await summarize({
     data: "Sehr langer Text...",
     maxWords: 50
 })
 ```
+
+Für Klassifikation ist jetzt `classify()` die spezialisierte, typisierte API; für
+klassische LLM-Extraktion und Texttransformation bleiben diese Magic-Funcs gedacht.
 
 ---
 
@@ -1053,17 +1211,17 @@ Hilfsfunktion für Stream-Output in der Konsole — nutzt intern `isInterrupt()`
 Top-level Exports (`@delofarag/ai-utils`):
 
 - Helpers (`helpers`, `memory`, `rag`, `llms`, `chatbot`, `logChunk`)
-- Core (`Agent`, `Chain`, `DeepAgent`)
+- Core (`Agent`, `Chain`, `DeepAgent`, `classify`, `JevAPIError` und alle `Jev*`-Types)
 - DeepAgent (`createWorkspaceBackend`, `createLocalShellBackend`, `createDenoSandbox`, `workspacePermissions`, `interruptOn`-Helper, alle `DeepAgent*`-Types)
 - Memory (`MemorySaver`, `SmartCheckpointSaver`, `SupabaseCheckpointSaver`, `chatSummarizer`)
-- Tools (`ToolRegistry`, `CombinedToolRegistry`, `ZodiosToolRegistry`, `Tavily`, `RAGTool`)
-- Magic-Funcs (answerers/evaluators/parsers/optimizers)
+- Tools (`ToolRegistry`, `createRAGTool`, `TavilySearch`, `tavilySearchTool`, MCP-Helper)
+- Magic-Funcs (`extract`, `structure`, `rewrite`, `summarize`)
 - Modalities (`vision`, `generateImages`)
 
 Client-Subpath (`@delofarag/ai-utils/client`) — ohne LangChain-Bundle, für Frontend:
 
 - Types: `DeepAgentInterrupt`, `DeepAgentToolEvent`, `DeepAgentStreamChunk`, ...
-- Guards: `isInterrupt()`, `isToolEvent()`
+- Guards: `isInterrupt()`, `isToolEvent()`, `isReasoningEvent()`, `isSubagentEvent()`
 
 ---
 
@@ -1071,6 +1229,7 @@ Client-Subpath (`@delofarag/ai-utils/client`) — ohne LangChain-Bundle, für Fr
 
 - Für strukturierte Outputs immer `zod/v4` verwenden.
 - Für Produktion API-Keys als ENV setzen, nicht hardcoden.
+- `classify()` für schnelle Klassifikation und probabilistische Entscheidungen; Chatmodelle für freie Textgenerierung.
 - Bei langen Chats `SmartCheckpointSaver` am `Agent` verwenden.
 - RAG als Tool im `Agent` ist in der Praxis oft robuster als RAG-only Prompting.
 - `Chain` für stateless Tasks, `Agent` für Tools und Conversation Memory, `DeepAgent` für autonome Coding-/Research-Agents.

@@ -19,7 +19,7 @@ type VisionOptions = {
  *
  * Internally this function sends `image_url` content parts through OpenRouter's
  * chat-completions-compatible interface. If no `llm` is provided, it builds one
- * with `getLLM({ provider: "openrouter" })` and reads
+ * with `getLLM({ from: "openrouter" })` and reads
  * `process.env.OPENROUTER_API_KEY`.
  *
  * Make sure `OPENROUTER_API_KEY` is set in your `.env`.
@@ -35,7 +35,7 @@ type VisionOptions = {
  * CONFIG:
  * ```ts
  * vision({
- *     llm = getLLM({ provider: "openrouter" }),
+ *     llm = getLLM({ from: "openrouter" }),
  *     prompt = "Describe the image in detail.",
  *     detail = "auto",
  *     images,
@@ -54,7 +54,7 @@ type VisionOptions = {
  * ```
  */
 export async function vision({
-    llm = getLLM({ provider: "openrouter" }),
+    llm = getLLM({ from: "openrouter" }),
     prompt = "Describe the image in detail.",
     detail = "auto",
     images,
@@ -76,7 +76,7 @@ export async function vision({
     const runtimeLLM =
         model && model !== runtime.model
             ? getLLM({
-                  provider: "openrouter",
+                  from: "openrouter",
                   model,
                   apikey: runtime.apiKey
               })
@@ -90,4 +90,3 @@ export async function vision({
         raw: response
     }
 }
-

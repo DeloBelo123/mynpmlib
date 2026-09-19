@@ -420,7 +420,7 @@ export class SmartCheckpointSaver extends BaseCheckpointSaver {
     /** Default-LLM lazy erzeugen — so ist kein OPENROUTER_API_KEY nötig, solange nie summarized wird oder ein eigenes LLM übergeben wurde. */
     private getSummaryLLM(): BaseChatModel {
         if (!this.llm) {
-            this.llm = getLLM({ provider: "openrouter", model: "openai/gpt-5.6-luna" })
+            this.llm = getLLM({ from: "openrouter", model: "openai/gpt-5.6-luna" })
         }
         return this.llm
     }

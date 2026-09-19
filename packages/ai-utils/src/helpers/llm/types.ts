@@ -147,6 +147,8 @@ export type OpenRouterModel = AutoComplete<
   | "qwen/qwen3.5-plus-02-15"
   | "qwen/qwen3.6-plus"
   | "rekaai/reka-edge"
+  | "~typesafe/jev-latest"
+  | "typesafe/jev-1.13"
   | "xiaomi/mimo-v2-flash"
   | "xiaomi/mimo-v2-omni"
   | "xiaomi/mimo-v2-pro"
@@ -239,21 +241,21 @@ export type LLMRuntimeConfig = {
 }
 
 export type GroqLLMConfig = {
-  provider: "chatgroq"
+  from: "chatgroq"
   model?: ChatGroqModel
   apikey?: string
   config?: LLMRuntimeConfig
 }
 
 export type OpenAILLMConfig = {
-  provider: "openai"
+  from: "openai"
   model?: OpenAIModel
   apikey?: string
   config?: LLMRuntimeConfig
 }
 
 type OpenRouterConfigBase = {
-  provider: "openrouter"
+  from: "openrouter"
   apikey?: string
   /**
    * Strengeres OpenRouter-Routing + EU-Endpunkt (`eu.openrouter.ai`) mit
@@ -279,7 +281,7 @@ export type OpenRouterFreeLLMConfig = OpenRouterConfigBase & {
 }
 
 export type LocalLLMConfig = {
-  provider: "local"
+  from: "local"
   model?: LocalModel
   config?: LLMRuntimeConfig
 }
@@ -306,8 +308,8 @@ type CLILLMConfigBase = {
   config?: LLMRuntimeConfig
 }
 
-export type ClaudeCLILLMConfig = CLILLMConfigBase & { provider: "claude-cli"; model?: ClaudeCLIModel }
-export type CodexCLILLMConfig = CLILLMConfigBase & { provider: "codex-cli"; model?: CodexCLIModel }
+export type ClaudeCLILLMConfig = CLILLMConfigBase & { from: "claude-cli"; model?: ClaudeCLIModel }
+export type CodexCLILLMConfig = CLILLMConfigBase & { from: "codex-cli"; model?: CodexCLIModel }
 
 export type LLMConfig =
   | GroqLLMConfig
