@@ -21,7 +21,9 @@
   "scripts": {
     "build": "rm -rf dist && tsc",
     "dev": "tsx",
-    "start": "tsx"
+    "start": "tsx",
+    "test": "tsc --noEmit -p tsconfig.test.json && node --import tsx --test spec/jevToolCaller.test.ts",
+    "test:jev-integration": "node --env-file=../.env --import tsx --test spec/jevToolCaller.integration.test.ts"
   },
   "dependencies": {
     "@delofarag/base-utils": "^1.3.1",

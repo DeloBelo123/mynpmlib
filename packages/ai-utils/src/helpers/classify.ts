@@ -1,5 +1,5 @@
-import { getLLM } from "../helpers/llm/llms"
-import { getOpenRouterRuntime, type LLMInstance } from "../modalities/openrouter"
+import { getLLM } from "./llm/llms"
+import { getOpenRouterRuntime } from "../modalities/openrouter"
 
 /** A JSON-compatible value accepted inside JEV state, instructions, and criteria. */
 export type JevJsonValue =
@@ -111,11 +111,8 @@ export type JevResult<Q extends JevQuestions> = {
 export type JevOptions<Q extends JevQuestions> = {
     state: JevEntry
     questions: Q
-    /**
-     * OpenRouter LLM created by `getLLM()`. Its API key, base URL, and model are
-     * reused for the Decisions request. Defaults to `~typesafe/jev-latest`.
-     */
-    llm?: LLMInstance
+    /** TypeSafe JEV model routed through OpenRouter. Defaults to `~typesafe/jev-latest`. */
+    model?: `~typesafe/${string}`
     /** Cancels the underlying HTTP request. */
     signal?: AbortSignal
 }
@@ -236,7 +233,7 @@ function assertValidResult<Q extends JevQuestions>(
  *
  * @param options.state Text, JSON object/array, or `null` to evaluate.
  * @param options.questions Named questions whose keys become `result.answers` keys.
- * @param options.llm OpenRouter LLM from `getLLM()`; defaults to JEV Latest.
+ * @param options.model TypeSafe JEV model routed through OpenRouter; defaults to JEV Latest.
  * @param options.signal Optional cancellation signal for the HTTP request.
  * @returns Typed answers plus the resolved model, token usage, cost, and request metadata.
  * @throws {JevAPIError} OpenRouter responds with a non-2xx status.
@@ -276,17 +273,15 @@ function assertValidResult<Q extends JevQuestions>(
 export async function classify<const Q extends JevQuestions>({
     state,
     questions,
-    llm,
+    model = "~typesafe/jev-latest",
     signal,
 }: JevOptions<Q>): Promise<JevResult<Q>> {
     assertValidQuestions(questions)
 
-    const openRouterLLM =
-        llm ??
-        getLLM({
-            from: "openrouter",
-            model: "~typesafe/jev-latest",
-        })
+    const openRouterLLM = getLLM({
+        from: "openrouter",
+        model,
+    })
     const runtime = getOpenRouterRuntime(openRouterLLM)
     const endpoint = new URL("/api/alpha/decisions", runtime.baseURL)
 

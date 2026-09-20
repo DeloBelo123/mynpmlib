@@ -2,7 +2,7 @@
 
 Ein praktisches Utility-Package für LLM-Apps mit LangChain:
 
-- `Chain`, `Agent`, `DeepAgent` (Filesystem, HITL, Sandboxes, Subagents)
+- `Chain`, `JevToolCaller`, `Agent`, `DeepAgent` (Filesystem, HITL, Sandboxes, Subagents)
 - `classify()` als schneller, typisierter JEV-Classifier über OpenRouter (Noul, Choice, Score)
 - Memory via Checkpoint-Saver (`MemorySaver`, `SmartCheckpointSaver`, `SupabaseCheckpointSaver`)
 - RAG-Helper (FAISS, Supabase, In-Memory)
@@ -119,8 +119,8 @@ und Wahrscheinlichkeiten.
 Intern nutzt `classify()` das JEV-Modell über OpenRouters
 [Decisions API](https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-questions-and-answers-request)
 und standardmäßig [`~typesafe/jev-latest`](https://openrouter.ai/~typesafe/jev-latest).
-Der API-Key, die Base-URL und das Modell kommen aus `getLLM()` beziehungsweise aus
-`OPENROUTER_API_KEY`.
+Der API-Key und die OpenRouter-Verbindung kommen intern aus `getLLM()` beziehungsweise
+aus `OPENROUTER_API_KEY`. Das Modell wird direkt über `model` gewählt.
 
 ### Die drei Classifier-Typen
 
@@ -190,13 +190,16 @@ TypeScript-Check einen Fehler.
 
 ### Eigenes Modell, Abbruch und Fehler
 
-Ein eigener, mit `getLLM()` gebauter OpenRouter-Client kann übergeben werden:
+Ein anderes TypeSafe-JEV-Modell kann direkt übergeben werden:
 
 ```ts
-import { classify, getLLM } from "@delofarag/ai-utils"
+import { classify } from "@delofarag/ai-utils"
 
-const llm = getLLM({ from: "openrouter", model: "typesafe/jev-1.13" })
-await classify({ llm, state: "...", questions: { /* ... */ } })
+await classify({
+    model: "~typesafe/jev-latest",
+    state: "...",
+    questions: { /* ... */ },
+})
 ```
 
 `signal` ist optional und dient ausschließlich zum Abbrechen des HTTP-Requests,
@@ -238,6 +241,111 @@ try {
 ## Core Classes
 
 > **DeepAgent-Dokumentation:** Abschnitt [3) DeepAgent](#3-deepagent) — Feature-Übersicht, Backend, HITL, Stream-Chunks, CLI-Testing.
+
+## `JevToolCaller`: bounded Tool Calling mit JEV
+
+`JevToolCaller` wählt pro `invoke()` genau ein Tool und bei Bedarf dessen
+Runtime-Parameter. Das ist kein generatives Tool Calling: Es gibt kein ReAct, kein
+Planning und keine Tool-Schemas. Jeder Parameter stammt exakt aus der Candidate-Liste,
+die das ausgewählte Tool über `runtimeParams()` liefert.
+
+```ts
+import { JevToolCaller, MemorySaver } from "@delofarag/ai-utils"
+import { z } from "zod/v4"
+
+type Candidate = {
+    id: string
+    name: string
+    birthDate: string
+}
+
+const contextSchema = z.object({
+    tenantId: z.string(),
+    apiToken: z.string(),
+})
+
+const caller = new JevToolCaller({
+    prompt: "Select the tool that best fulfills the user's request.",
+    contextSchema,
+    tools: [
+        {
+            name: "get_candidate",
+            description: "Returns a candidate from the recruiting system.",
+            runtimeParams: async ({ context }) => ({
+                candidate: await loadCandidates(context.tenantId, context.apiToken),
+            }),
+            func: async ({ candidate }, { context }) =>
+                getCandidate(candidate.id, context.apiToken),
+        },
+    ],
+    checkpointer: new MemorySaver(),
+})
+
+const candidate = await caller.invoke({
+    Frage: "Welcher Max Müller wurde 2002 geboren?",
+    thread_id: "u1",
+    context: {
+        tenantId: "tenant-acme",
+        apiToken: process.env.RECRUITING_API_TOKEN!,
+    },
+})
+```
+
+`candidate` ist hier nur ein Beispiel. Tool-Namen, Parameter-Keys, Candidate-Werte
+und Rückgabetypen sind generisch und enthalten keinerlei domänenspezifische Logik.
+
+`runtimeParams()` wird erst aufgerufen, nachdem JEV ein Tool ausgewählt hat. Die
+Funktion liefert ein Objekt, dessen Keys die Parameter des Tools beschreiben und
+dessen Werte Arrays mit den dafür erlaubten Runtime-Werten sind. JEV generiert
+also keine Argumente, sondern entscheidet für jeden mehrdeutigen Parameter,
+welches vorhandene Array-Element am besten zur Anfrage passt. Bei einem Array mit
+genau einem Element ist keine Entscheidung nötig; dieses Element wird direkt
+übernommen.
+
+Anschließend baut `JevToolCaller` das Argument-Objekt für `func()` auf. Die Keys
+aus `runtimeParams()` bleiben erhalten, aber jedes Candidate-Array wird durch das
+ausgewählte Originalelement ersetzt:
+
+```ts
+// Return von runtimeParams()
+{
+    candidate: [candidateA, candidateB],
+    permission: ["read", "write"],
+}
+
+// Nach der JEV-Auswahl: erster Parameter von func(); die echten args halt der zweite ist ja runtime einfach
+{
+    candidate: candidateB,
+    permission: "read",
+}
+```
+
+`func(args)` wird genau einmal mit diesem fertigen Objekt ausgeführt. Der erste
+`func()`-Parameter bleibt bewusst untypisiert; zwischen dem Return-Typ von
+`runtimeParams()` und `args` gibt es keine automatische TypeScript-Inferenz.
+`context` wird aus `contextSchema` inferiert und vor jedem Invoke mit Zod validiert.
+Er steht in `runtimeParams()` und als zweiter Parameter von `func()` zur Verfügung,
+wird aber weder an JEV gesendet noch im Checkpoint oder in Debug-Metadaten gespeichert.
+Damit eignet er sich für Auth-Daten, Session-IDs, Secrets und lokale Konfiguration.
+
+Der Ablauf ist fest begrenzt:
+
+```text
+user_request
+→ JEV wählt ein Tool
+→ runtimeParams() nur dieses Tools
+→ liefert pro Parameter ein Array erlaubter Runtime-Werte
+→ JEV wählt für alle mehrdeutigen Parameter parallel je ein Array-Element
+→ JevToolCaller baut { parameterKey: ausgewähltes Originalelement }
+→ func(args, runtimeContext) wird einmal ausgeführt
+→ der Return von func() ist der Return von invoke()
+```
+
+Parameter mit genau einem Candidate werden deterministisch ohne zweiten JEV-Call
+übernommen. Eine leere Candidate-Liste wirft einen Fehler. Tools ohne
+`runtimeParams()` werden direkt mit `{}` ausgeführt. Mit `debug: true` enthält die
+Antwort zusätzlich Tool-/Parameter-Entscheidungen, summierte Usage, Argumente und
+den verwendeten State. Bei einem `checkpointer` ist `thread_id` verpflichtend.
 
 ## 1) `Chain`
 

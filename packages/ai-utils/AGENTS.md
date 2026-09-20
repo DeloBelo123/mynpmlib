@@ -7,7 +7,8 @@ Kurzreferenz für Entwicklung und AI-Assistenten in `@delofarag/ai-utils`.
 | Modul | Pfad | Zweck |
 |---|---|---|
 | `Chain` | `src/heart/chain.ts` | Stateless LLM-Calls mit Zod-Output, optional RAG |
-| `classify` | `src/heart/jev.ts` | Typisierte JEV-Klassifikation (`noul`, `choice`, `score`) über OpenRouter |
+| `classify` | `src/helpers/classify.ts` | Typisierte JEV-Klassifikation (`noul`, `choice`, `score`) über OpenRouter |
+| `JevToolCaller` | `src/heart/jevToolCaller.ts` | Bounded JEV-Tool- und Runtime-Parameter-Auswahl ohne generiertes Argument-Schema |
 | `Agent` | `src/heart/agent.ts` | Tool-using ReAct-Agent, optional Checkpointer + strukturierter Output |
 | `DeepAgent` | `src/heart/deepAgent.ts` | LangChain Deep Agent (Filesystem, Subagents, Sandboxes) |
 | Checkpointer | `src/helpers/memory.ts` | Checkpoint-Saver (Supabase, Smart-Summary) |
@@ -66,18 +67,22 @@ await deepAgent.invoke({ input: "Analysiere das Projekt.", thread_id: "u1" })
 - `agentsMd` → `createDeepAgent({ memory })` (AGENTS.md Startup-Kontext, kein Chat-Verlauf)
 - `checkpointer` → LangGraph Thread-Persistenz (wie bei `Agent`)
 
-## Chain vs Agent vs DeepAgent
+## Chain vs JevToolCaller vs Agent vs DeepAgent
 
-| | `Chain` | `Agent` | `DeepAgent` |
-|---|---|---|---|
-| Runtime | prompt pipe / RAG | `createReactAgent` | `createDeepAgent` |
-| Tools | nein | ja | ja + built-in fs/planning/subagents |
-| Thread-State | nein | optional via `checkpointer` | optional via `checkpointer` |
-| AGENTS.md-Kontext | nein | nein | optional via `agentsMd` |
-| Output | Zod (default schema) | optional Zod via `output` | optional Zod via `output` |
-| Stream | ja (Text) | ja (Text) | ja (Text) |
-| RAG | `vectorStore` | `createRAGTool` | `createRAGTool` |
-| Filesystem / Sandbox | nein | nein | ja via `backend` |
+| | `Chain` | `JevToolCaller` | `Agent` | `DeepAgent` |
+|---|---|---|---|---|
+| Runtime | prompt pipe / RAG | zwei bounded JEV-Entscheidungsstufen | `createReactAgent` | `createDeepAgent` |
+| Tools | nein | exakt eins pro Invoke | ja | ja + built-in fs/planning/subagents |
+| Thread-State | nein | optional via `checkpointer` | optional via `checkpointer` | optional via `checkpointer` |
+| Argumente | — | nur Originalwerte aus `runtimeParams()` | generiert aus Tool-Schema | generiert aus Tool-Schema |
+| ReAct / Planning | nein | nein | ReAct | ja |
+| Stream | ja (Text) | nein | ja (Text) | ja (Text) |
+
+`JevToolCaller.contextSchema` typisiert und validiert lokalen Execution-Context für
+`runtimeParams()` und `func()`. Dieser Context darf Auth, Session-IDs oder Secrets
+enthalten und wird deshalb nie an JEV gesendet oder in Checkpoints/Debug-Metadaten gespeichert.
+Runtime-Keys bleiben unverändert; das ausgewählte Originalelement steht in `func()`
+unter demselben Key.
 
 ## Tool-Registry
 
