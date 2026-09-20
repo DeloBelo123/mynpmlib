@@ -71,7 +71,7 @@ await deepAgent.invoke({ input: "Analysiere das Projekt.", thread_id: "u1" })
 
 | | `Chain` | `JevToolCaller` | `Agent` | `DeepAgent` |
 |---|---|---|---|---|
-| Runtime | prompt pipe / RAG | zwei bounded JEV-Entscheidungsstufen | `createReactAgent` | `createDeepAgent` |
+| Runtime | prompt pipe / RAG | eine Tool-Wahl + optionale bounded Parameter-Wahl | `createReactAgent` | `createDeepAgent` |
 | Tools | nein | exakt eins pro Invoke | ja | ja + built-in fs/planning/subagents |
 | Thread-State | nein | optional via `checkpointer` | optional via `checkpointer` | optional via `checkpointer` |
 | Argumente | — | nur Originalwerte aus `runtimeParams()` | generiert aus Tool-Schema | generiert aus Tool-Schema |
@@ -81,15 +81,19 @@ await deepAgent.invoke({ input: "Analysiere das Projekt.", thread_id: "u1" })
 `JevToolCaller.contextSchema` typisiert und validiert lokalen Execution-Context für
 `runtimeParams()` und `func()`. Dieser Context darf Auth, Session-IDs oder Secrets
 enthalten und wird deshalb nie an JEV gesendet oder in Checkpoints/Debug-Metadaten gespeichert.
-Runtime-Keys bleiben unverändert; das ausgewählte Originalelement steht in `func()`
-unter demselben Key.
+`func()` erhält genau `{ context, state, thread_id, args }`. Runtime-Keys bleiben
+unverändert; ausgewählte Originalelemente stehen unter `args[key]`. Ohne
+`runtimeParams()` wird das gewählte Tool direkt mit `args: {}` ausgeführt.
+Die aktuelle Anfrage ist der neueste `user`-Eintrag in `state.message_history`.
+`mcpServer` lädt zusätzlich präfixierte `<server>__<tool>`-Tools; optionale
+Candidate-Provider stehen unter `mcpServer.runtimeParams[unprefixedToolName]`.
 
 ## Tool-Registry
 
 **`ToolRegistry`** wandelt einfache `{ name, description, schema, func }`-Definitionen in typisierte `DynamicStructuredTool`s um.
 
 `createRAGTool()` gibt direkt ein `DynamicStructuredTool` zurück — kein manuelles Wrapping nötig.
-Remote-Tools werden über `mcpServer` an `Agent` oder `DeepAgent` angebunden.
+Remote-Tools werden über `mcpServer` an `Agent`, `JevToolCaller` oder `DeepAgent` angebunden.
 
 ## Defaults
 

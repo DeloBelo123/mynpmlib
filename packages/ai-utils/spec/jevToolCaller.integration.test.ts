@@ -43,7 +43,8 @@ test(
                             assert.equal(context.tenantId, "tenant-acme")
                             return { product: [redProduct, blueProduct] }
                         },
-                        func: async ({ product }, { context }) => {
+                        func: async ({ args, context }) => {
+                            const { product } = args
                             receivedProduct = product
                             return {
                                 selectedSku: product.sku,
@@ -59,7 +60,7 @@ test(
                             unusedRuntimeParamsCalled = true
                             return { location: ["Berlin", "Hamburg"] }
                         },
-                        func: async ({ location }) => location,
+                        func: async ({ args }) => args.location,
                     },
                 ],
             })

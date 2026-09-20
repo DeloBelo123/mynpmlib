@@ -14,18 +14,53 @@ import {
     type JevQuestions,
     type JevUsage,
 } from "../helpers/classify"
+import {
+    buildMcpClient,
+    type MCPServerConfig,
+} from "./tools/MCP"
 
 export type JevModel = `~typesafe/${string}`
+
+const DEFAULT_JEV_TOOL_CALLER_PROMPT =
+    "Treat the latest user message as the current request and earlier messages only as context. Select the available tool that best fulfills the request."
+
+/**
+ * Signals that a selected tool cannot run because one runtime parameter has no
+ * available options. This is a domain outcome, unlike malformed
+ * `runtimeParams()` output, which throws a `TypeError`.
+ */
+export class JevNoParamOptionsError extends Error {
+    readonly code = "JEV_NO_PARAM_OPTIONS" as const
+    readonly toolName: string
+    readonly parameterName: string
+
+    constructor(toolName: string, parameterName: string) {
+        super(
+            `Runtime parameter "${parameterName}" for tool "${toolName}" has no candidates`,
+        )
+        this.name = "JevNoParamOptionsError"
+        this.toolName = toolName
+        this.parameterName = parameterName
+        Object.setPrototypeOf(this, new.target.prototype)
+    }
+}
 
 export type JevContextSchema = z.ZodObject
 
 export type JevContextValue<TSchema extends JevContextSchema> = z.infer<TSchema>
 
 export interface JevToolRuntimeContext<TContext = undefined> {
+    /** State evaluated by JEV, including the current user message. */
     state: JevToolCallerState
+    /** Thread used by the optional checkpointer. */
     thread_id?: string
     /** Validated local execution context. It is never sent to JEV or persisted. */
     context: TContext
+}
+
+/** Input passed to a tool function. Runtime-selected values live in `args`. */
+export type JevToolFunctionInput<TContext = undefined> = JevToolRuntimeContext<TContext> & {
+    args: Record<string, any>
 }
 
 export type JevRuntimeParamChoices = Record<string, readonly JevEntry[]>
@@ -34,19 +69,39 @@ export type JevRuntimeParams<
     TChoices extends JevRuntimeParamChoices = JevRuntimeParamChoices,
 > = TChoices
 
+export interface JevMcpToolRuntimeContext<TContext = undefined>
+    extends JevToolRuntimeContext<TContext> {
+    /** MCP server that owns the selected tool. Never sent to JEV. */
+    server: JevMCPServerConfig<TContext>
+}
+
+export type JevMcpRuntimeParams<TContext = undefined> = Record<
+    string,
+    (
+        runtimeContext: JevMcpToolRuntimeContext<TContext>,
+    ) => JevRuntimeParamChoices | Promise<JevRuntimeParamChoices>
+>
+
+export interface JevMCPServerConfig<TContext = undefined> extends MCPServerConfig {
+    /** Runtime choices keyed by the MCP tool's unprefixed name. */
+    runtimeParams?: JevMcpRuntimeParams<TContext>
+}
+
+export type JevMCPServersInput<TContext = undefined> =
+    | JevMCPServerConfig<TContext>
+    | JevMCPServerConfig<TContext>[]
+
 export type JevTool<
     TResult = unknown,
     TContext = undefined,
 > = {
     name: string
     description: string
+    /** Optional bounded values for arguments needed by this tool. */
     runtimeParams?: (
         runtimeContext: JevToolRuntimeContext<TContext>,
     ) => JevRuntimeParamChoices | Promise<JevRuntimeParamChoices>
-    func: (
-        args: Record<string, JevEntry>,
-        runtimeContext: JevToolRuntimeContext<TContext>,
-    ) => TResult | Promise<TResult>
+    func: (input: JevToolFunctionInput<TContext>) => TResult | Promise<TResult>
 }
 
 type AnyJevTool<TContext = any> = {
@@ -55,7 +110,7 @@ type AnyJevTool<TContext = any> = {
     runtimeParams?: (
         runtimeContext: JevToolRuntimeContext<TContext>,
     ) => unknown
-    func: (args: any, runtimeContext: JevToolRuntimeContext<TContext>) => any
+    func: (input: JevToolFunctionInput<TContext>) => any
 }
 
 type JevToolCallerBaseProps<TTools extends readonly AnyJevTool[]> = {
@@ -63,7 +118,6 @@ type JevToolCallerBaseProps<TTools extends readonly AnyJevTool[]> = {
     prompt: string
     tools: TTools
     checkpointer?: BaseCheckpointSaver
-    describe?: string
 }
 
 export type JevToolCallerProps<
@@ -71,6 +125,8 @@ export type JevToolCallerProps<
     TContext = undefined,
 > = JevToolCallerBaseProps<TTools> & {
     contextSchema?: JevContextSchema & z.ZodType<TContext>
+    /** Remote tools loaded and closed for every invoke. */
+    mcpServer?: JevMCPServersInput<TContext>
 }
 
 type JevToolCallerInvokeControls = {
@@ -95,7 +151,6 @@ export type JevToolCallerHistoryEntry = {
 export type JevToolCallerState = {
     system_prompt: string
     message_history: JevToolCallerHistoryEntry[]
-    user_request: Record<string, JevJsonValue>
 }
 
 export type JevToolReturn<TTools extends readonly AnyJevTool[]> = TTools[number]["func"] extends (
@@ -103,6 +158,11 @@ export type JevToolReturn<TTools extends readonly AnyJevTool[]> = TTools[number]
 ) => infer TResult
     ? Awaited<TResult>
     : never
+
+export type JevToolCallerReturn<
+    TTools extends readonly AnyJevTool[],
+    THasMcp extends boolean,
+> = THasMcp extends true ? unknown : JevToolReturn<TTools>
 
 export interface JevToolCallerSelectionMetadata {
     choice: string
@@ -204,17 +264,27 @@ function parseHistoryContent(content: string): JevEntry {
  * bounded values returned at runtime. The original selected values are passed to
  * the tool; JEV never generates arbitrary arguments.
  *
- * Each selected runtime value is passed to `func()` under its unchanged
- * `runtimeParams()` key. For example, `{ user: User[] }` becomes `{ user: User }`.
+ * `func()` receives one object containing `state`, `thread_id`, `context`, and
+ * `args`. Each selected runtime value is stored in `args` under its unchanged
+ * `runtimeParams()` key. Without `runtimeParams()`, `args` is `{}` and the tool
+ * executes immediately after the initial tool-selection call.
  *
  * An optional `contextSchema` validates local execution data such as auth,
  * session IDs, secrets, or environment-derived configuration. The inferred
  * `context` is available to `runtimeParams()` and `func()`, but is never included
  * in JEV state, debug metadata, or checkpoint history.
  *
- * Flow: user request → tool Choice → runtimeParams() → argument Choices → one
- * tool execution. This is not ReAct, planning, or generative tool calling and no
- * tool schema is required.
+ * The current request is appended to `state.message_history` before JEV sees it.
+ * Flow: message history → tool Choice → optional runtimeParams() and argument
+ * Choices → one tool execution. This is not ReAct, planning, or generative tool
+ * calling and no tool schema is required.
+ *
+ * Optional MCP servers are loaded per `invoke()`. Their tools use the
+ * `<server>__<tool>` prefix and the MCP client is always closed afterward.
+ *
+ * The constructor's `prompt` contains the domain-specific instructions. A
+ * built-in instruction to treat the latest user message as the current request
+ * and select the best available tool is always appended automatically.
  *
  * Internally uses this package's `classify()` utility.
  *
@@ -235,8 +305,8 @@ function parseHistoryContent(content: string): JevEntry {
  *             runtimeParams: async ({ context }) => ({
  *                 region: await loadRegions(context.apiKey),
  *             }),
- *             func: async ({ region }, { context }) => {
- *                 return getStatus(region, context.sessionId)
+ *             func: async ({ args, context }) => {
+ *                 return getStatus(args.region, context.sessionId)
  *             },
  *         },
  *     ],
@@ -254,45 +324,49 @@ function parseHistoryContent(content: string): JevEntry {
 export interface JevToolCaller<
     TTools extends readonly AnyJevTool[] = readonly AnyJevTool[],
     TContext = undefined,
+    THasMcp extends boolean = false,
 > {
     readonly model: JevModel
     readonly prompt: string
     readonly tools: TTools
-    readonly checkpointer: BaseCheckpointSaver | undefined
-    readonly describe: string | undefined
-    readonly contextSchema: (JevContextSchema & z.ZodType<TContext>) | undefined
 
     invoke(
         input: JevToolCallerInvokeInput<TContext> & { debug: true },
-    ): Promise<JevToolCallerDebugResult<JevToolReturn<TTools>>>
+    ): Promise<JevToolCallerDebugResult<JevToolCallerReturn<TTools, THasMcp>>>
     invoke(
         input: JevToolCallerInvokeInput<TContext> & { debug?: false | undefined },
-    ): Promise<JevToolReturn<TTools>>
+    ): Promise<JevToolCallerReturn<TTools, THasMcp>>
     invoke(
         input: JevToolCallerInvokeInput<TContext>,
-    ): Promise<JevToolReturn<TTools> | JevToolCallerDebugResult<JevToolReturn<TTools>>>
+    ): Promise<
+        | JevToolCallerReturn<TTools, THasMcp>
+        | JevToolCallerDebugResult<JevToolCallerReturn<TTools, THasMcp>>
+    >
 }
 
 class JevToolCallerImplementation<
     TContext,
     TTools extends readonly AnyJevTool<TContext>[],
-> implements JevToolCaller<TTools, TContext> {
+> {
     public readonly model: JevModel
     public readonly prompt: string
     public readonly tools: TTools
-    public readonly checkpointer: BaseCheckpointSaver | undefined
-    public readonly describe: string | undefined
-    public readonly contextSchema: (JevContextSchema & z.ZodType<TContext>) | undefined
+    private readonly checkpointer: BaseCheckpointSaver | undefined
+    private readonly contextSchema: (JevContextSchema & z.ZodType<TContext>) | undefined
+    private readonly mcpServer: JevMCPServersInput<TContext> | undefined
 
     constructor({
         model = "~typesafe/jev-latest",
         prompt,
         tools,
         checkpointer,
-        describe,
         contextSchema,
+        mcpServer,
     }: JevToolCallerProps<TTools, TContext>) {
-        if (tools.length === 0) {
+        const hasMcpServer = Array.isArray(mcpServer)
+            ? mcpServer.length > 0
+            : mcpServer !== undefined
+        if (tools.length === 0 && !hasMcpServer) {
             throw new TypeError("JevToolCaller requires at least one tool")
         }
 
@@ -311,11 +385,14 @@ class JevToolCallerImplementation<
         }
 
         this.model = model
-        this.prompt = prompt
+        this.prompt = [prompt.trim(), DEFAULT_JEV_TOOL_CALLER_PROMPT]
+            .filter(Boolean)
+            .join("\n\n")
         this.tools = tools
         this.checkpointer = checkpointer
-        this.describe = describe
         this.contextSchema = contextSchema
+        this.mcpServer = mcpServer
+        this.validateMcpServers()
     }
 
     public async invoke(
@@ -330,15 +407,36 @@ class JevToolCallerImplementation<
     public async invoke(
         input: JevToolCallerInvokeInput<TContext>,
     ): Promise<JevToolReturn<TTools> | JevToolCallerDebugResult<JevToolReturn<TTools>>> {
-        const { debug = false, thread_id, signal, context: rawContext, ...request } = input
-        this.validateThreadConfig(thread_id)
-        const context = this.parseContext(rawContext)
+        this.validateThreadConfig(input.thread_id)
+        const context = this.parseContext(input.context)
+        const mcpClient = buildMcpClient(this.mcpServer)
+        try {
+            const mcpTools = mcpClient ? await mcpClient.getTools() : []
+            const availableTools: readonly AnyJevTool<TContext>[] = [
+                ...this.tools,
+                ...this.adaptMcpTools(mcpTools),
+            ]
+            this.validateAvailableTools(availableTools)
+            return await this.invokeWithTools(input, availableTools, context)
+        } finally {
+            await mcpClient?.close()
+        }
+    }
+
+    private async invokeWithTools(
+        input: JevToolCallerInvokeInput<TContext>,
+        availableTools: readonly AnyJevTool<TContext>[],
+        context: TContext,
+    ): Promise<JevToolReturn<TTools> | JevToolCallerDebugResult<JevToolReturn<TTools>>> {
+        const { debug = false, thread_id, signal, context: _context, ...request } = input
 
         const userRequest = toJevRecord(request)
         const state: JevToolCallerState = {
             system_prompt: this.prompt,
-            message_history: await this.loadHistory(thread_id),
-            user_request: userRequest,
+            message_history: [
+                ...await this.loadHistory(thread_id),
+                { role: "user", content: userRequest },
+            ],
         }
         const runtimeContext: JevToolRuntimeContext<TContext> = {
             state,
@@ -353,7 +451,7 @@ class JevToolCallerImplementation<
         }
 
         const toolCriteria = Object.fromEntries(
-            this.tools.map(tool => [tool.name, tool.description]),
+            availableTools.map(tool => [tool.name, tool.description]),
         )
         const toolDecision = await classify({
             state,
@@ -361,7 +459,7 @@ class JevToolCallerImplementation<
                 tool: {
                     type: "choice",
                     instructions:
-                        "Select the tool that best fulfills the current user_request while respecting system_prompt and message_history.",
+                        "Select the tool that best fulfills the latest user message while respecting system_prompt and the full message_history.",
                     criteria: toolCriteria,
                 },
             },
@@ -371,7 +469,7 @@ class JevToolCallerImplementation<
         addUsage(usage, toolDecision.usage)
 
         const toolAnswer = toolDecision.answers.tool
-        const selectedTool = this.tools.find(tool => tool.name === toolAnswer.choice)
+        const selectedTool = availableTools.find(tool => tool.name === toolAnswer.choice)
         if (!selectedTool) {
             throw new Error(`JEV selected an unknown tool: "${toolAnswer.choice}"`)
         }
@@ -401,9 +499,7 @@ class JevToolCallerImplementation<
                     )
                 }
                 if (values.length === 0) {
-                    throw new Error(
-                        `Runtime parameter "${runtimeName}" for tool "${selectedTool.name}" has no candidates`,
-                    )
+                    throw new JevNoParamOptionsError(selectedTool.name, runtimeName)
                 }
                 if (values.length === 1) {
                     args[runtimeName] = values[0]
@@ -417,7 +513,7 @@ class JevToolCallerImplementation<
                 for (const { runtimeName, values } of ambiguous) {
                     questions[runtimeName] = {
                         type: "choice",
-                        instructions: `Select one value from runtime parameter "${runtimeName}" that best fulfills the current user_request.`,
+                        instructions: `Select one value from runtime parameter "${runtimeName}" that best fulfills the latest user message.`,
                         criteria: Object.fromEntries(
                             values.map((value, index) => [`option_${index}`, value]),
                         ),
@@ -465,12 +561,12 @@ class JevToolCallerImplementation<
         }
 
         const executableTool = selectedTool as unknown as {
-            func: (
-                args: Record<string, JevEntry>,
-                runtimeContext: JevToolRuntimeContext<TContext>,
-            ) => unknown
+            func: (input: JevToolFunctionInput<TContext>) => unknown
         }
-        const result = (await executableTool.func(args, runtimeContext)) as JevToolReturn<TTools>
+        const result = (await executableTool.func({
+            ...runtimeContext,
+            args,
+        })) as JevToolReturn<TTools>
         await this.saveHistory(thread_id, userRequest, selectedTool.name, args, result)
 
         if (!debug) return result
@@ -488,6 +584,89 @@ class JevToolCallerImplementation<
                 usage: publicUsage(usage),
                 state,
             },
+        }
+    }
+
+    private adaptMcpTools(mcpTools: readonly any[]): AnyJevTool<TContext>[] {
+        const servers = this.mcpServer
+            ? Array.isArray(this.mcpServer)
+                ? this.mcpServer
+                : [this.mcpServer]
+            : []
+
+        return mcpTools.map((tool) => {
+            const toolName = String(tool.name ?? "")
+            const server = [...servers]
+                .sort((left, right) => right.name.length - left.name.length)
+                .find(candidate =>
+                    toolName.startsWith(`${candidate.name}__`),
+                )
+            if (!server) {
+                throw new Error(
+                    `Could not resolve the MCP server for prefixed tool "${toolName}"`,
+                )
+            }
+
+            const unprefixedToolName = toolName.slice(`${server.name}__`.length)
+            const runtimeParams = server.runtimeParams?.[unprefixedToolName]
+
+            return {
+                name: toolName,
+                description: [
+                    server.description,
+                    typeof tool.description === "string" && tool.description.trim().length > 0
+                        ? tool.description
+                        : `MCP tool ${toolName}`,
+                ].filter(Boolean).join("\n"),
+                ...(runtimeParams
+                    ? {
+                          runtimeParams: (runtimeContext: JevToolRuntimeContext<TContext>) =>
+                              runtimeParams({
+                                  ...runtimeContext,
+                                  server,
+                              }),
+                      }
+                    : {}),
+                func: async ({ args }: JevToolFunctionInput<TContext>) =>
+                    await tool.invoke(args),
+            }
+        })
+    }
+
+    private validateAvailableTools(tools: readonly AnyJevTool<TContext>[]): void {
+        if (tools.length === 0) {
+            throw new TypeError("JevToolCaller requires at least one available tool")
+        }
+
+        const names = new Set<string>()
+        for (const tool of tools) {
+            if (tool.name.trim().length === 0) {
+                throw new TypeError("JevToolCaller tool names must not be empty")
+            }
+            if (tool.description.trim().length === 0) {
+                throw new TypeError(`JevToolCaller tool "${tool.name}" requires a description`)
+            }
+            if (names.has(tool.name)) {
+                throw new TypeError(`JevToolCaller tool names must be unique: "${tool.name}"`)
+            }
+            names.add(tool.name)
+        }
+    }
+
+    private validateMcpServers(): void {
+        if (!this.mcpServer) return
+        const servers = Array.isArray(this.mcpServer) ? this.mcpServer : [this.mcpServer]
+        const names = new Set<string>()
+        for (const server of servers) {
+            if (server.name.trim().length === 0) {
+                throw new TypeError("JevToolCaller MCP server names must not be empty")
+            }
+            if (names.has(server.name)) {
+                throw new TypeError(
+                    `JevToolCaller MCP server names must be unique: "${server.name}"`,
+                )
+            }
+            names.add(server.name)
         }
     }
 
@@ -597,9 +776,21 @@ export interface JevToolCallerConstructor {
         prompt: string
         tools: TTools
         checkpointer?: BaseCheckpointSaver
-        describe?: string
         contextSchema: JevContextSchema & z.ZodType<TContext>
-    }): JevToolCaller<TTools, TContext>
+        mcpServer: JevMCPServersInput<NoInfer<TContext>>
+    }): JevToolCaller<TTools, TContext, true>
+
+    new<
+        const TContext,
+        const TTools extends readonly AnyJevTool<NoInfer<TContext>>[],
+    >(props: {
+        model?: JevModel
+        prompt: string
+        tools: TTools
+        checkpointer?: BaseCheckpointSaver
+        contextSchema: JevContextSchema & z.ZodType<TContext>
+        mcpServer?: never
+    }): JevToolCaller<TTools, TContext, false>
 
     new<
         const TTools extends readonly AnyJevTool<undefined>[],
@@ -608,9 +799,20 @@ export interface JevToolCallerConstructor {
         prompt: string
         tools: TTools
         checkpointer?: BaseCheckpointSaver
-        describe?: string
         contextSchema?: never
-    }): JevToolCaller<TTools, undefined>
+        mcpServer: JevMCPServersInput<undefined>
+    }): JevToolCaller<TTools, undefined, true>
+
+    new<
+        const TTools extends readonly AnyJevTool<undefined>[],
+    >(props: {
+        model?: JevModel
+        prompt: string
+        tools: TTools
+        checkpointer?: BaseCheckpointSaver
+        contextSchema?: never
+        mcpServer?: never
+    }): JevToolCaller<TTools, undefined, false>
 }
 
 /** Construct a bounded JEV tool caller. See {@link JevToolCaller}. */

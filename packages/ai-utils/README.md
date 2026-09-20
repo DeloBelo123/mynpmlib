@@ -244,10 +244,24 @@ try {
 
 ## `JevToolCaller`: bounded Tool Calling mit JEV
 
-`JevToolCaller` wählt pro `invoke()` genau ein Tool und bei Bedarf dessen
-Runtime-Parameter. Das ist kein generatives Tool Calling: Es gibt kein ReAct, kein
-Planning und keine Tool-Schemas. Jeder Parameter stammt exakt aus der Candidate-Liste,
-die das ausgewählte Tool über `runtimeParams()` liefert.
+`JevToolCaller` wählt pro `invoke()` genau ein lokales oder per MCP geladenes Tool
+und führt es genau einmal aus. Das ist kein generatives Tool Calling: Es gibt kein
+ReAct, kein Planning und keine vom Modell frei erzeugten Argumente. Falls ein Tool
+Parameter benötigt, definiert `runtimeParams()` den vollständigen erlaubten
+Wertebereich und JEV wählt daraus ausschließlich vorhandene Originalwerte.
+
+### Constructor-Props
+
+| Prop | Pflicht | Bedeutung |
+|---|---:|---|
+| `prompt` | ja | Domänenspezifischer System-Prompt; der allgemeine Tool-Auswahl-Prompt wird automatisch angehängt |
+| `tools` | ja | Lokale Tools; darf bei konfiguriertem MCP ein leeres Array sein |
+| `model` | nein | TypeSafe-JEV-Modell, Default: `~typesafe/jev-latest` |
+| `contextSchema` | nein | Zod-Objektschema für lokalen Invoke-Context |
+| `checkpointer` | nein | Persistiert Message-History pro `thread_id` |
+| `mcpServer` | nein | Ein Remote-MCP-Server oder ein Array von Servern |
+
+### Vollständiges Beispiel
 
 ```ts
 import { JevToolCaller, MemorySaver } from "@delofarag/ai-utils"
@@ -274,8 +288,19 @@ const caller = new JevToolCaller({
             runtimeParams: async ({ context }) => ({
                 candidate: await loadCandidates(context.tenantId, context.apiToken),
             }),
-            func: async ({ candidate }, { context }) =>
-                getCandidate(candidate.id, context.apiToken),
+            func: async ({ args, context, state, thread_id }) => {
+                const { candidate } = args
+                return getCandidate(candidate.id, context.apiToken)
+            },
+        },
+        {
+            name: "healthcheck",
+            description: "Checks whether the recruiting system is reachable.",
+            // Kein runtimeParams nötig: Das Tool braucht keine ausgewählten Argumente.
+            func: async ({ args, context }) => {
+                // args ist hier {}
+                return checkHealth(context.apiToken)
+            },
         },
     ],
     checkpointer: new MemorySaver(),
@@ -291,8 +316,38 @@ const candidate = await caller.invoke({
 })
 ```
 
-`candidate` ist hier nur ein Beispiel. Tool-Namen, Parameter-Keys, Candidate-Werte
-und Rückgabetypen sind generisch und enthalten keinerlei domänenspezifische Logik.
+`candidate` ist nur ein Beispiel. Tool-Namen, Parameter-Keys, Candidate-Werte und
+Rückgabetypen sind generisch und enthalten keine domänenspezifische Logik.
+
+### Tool-Definition
+
+Ein Tool besteht aus:
+
+| Feld | Pflicht | Bedeutung |
+|---|---:|---|
+| `name` | ja | Eindeutiger Name, den JEV auswählt |
+| `description` | ja | Klare Beschreibung, wann dieses Tool richtig ist |
+| `runtimeParams` | nein | Liefert die zur Laufzeit erlaubten Werte pro Argument |
+| `func` | ja | Wird nach der Auswahl genau einmal ausgeführt |
+
+`func()` erhält immer genau ein Objekt:
+
+```ts
+func: async ({
+    context,   // durch contextSchema validierte lokale Daten
+    state,     // system_prompt + vollständige message_history
+    thread_id, // optionaler Thread-Identifier
+    args,      // durch runtimeParams/JEV ausgewählte Werte oder {}
+}) => {
+    // Tool ausführen
+}
+```
+
+`runtimeParams()` ist optional. Benötigt das Tool außer `context`, `state` und
+`thread_id` keine weiteren Werte, wird es nach der Tool-Auswahl sofort mit
+`args: {}` ausgeführt. Es findet dann kein Parameter-Auswahl-Call an JEV statt.
+
+### Wie `runtimeParams()` zu `args` wird
 
 `runtimeParams()` wird erst aufgerufen, nachdem JEV ein Tool ausgewählt hat. Die
 Funktion liefert ein Objekt, dessen Keys die Parameter des Tools beschreiben und
@@ -313,39 +368,200 @@ ausgewählte Originalelement ersetzt:
     permission: ["read", "write"],
 }
 
-// Nach der JEV-Auswahl: erster Parameter von func(); die echten args halt der zweite ist ja runtime einfach
+// Nach der JEV-Auswahl: input.args in func()
 {
     candidate: candidateB,
     permission: "read",
 }
 ```
 
-`func(args)` wird genau einmal mit diesem fertigen Objekt ausgeführt. Der erste
-`func()`-Parameter bleibt bewusst untypisiert; zwischen dem Return-Typ von
-`runtimeParams()` und `args` gibt es keine automatische TypeScript-Inferenz.
+Alle mehrdeutigen Parameter werden gemeinsam in einem zweiten JEV-Call ausgewählt.
+Arrays mit genau einem Element übernimmt `JevToolCaller` deterministisch. Sind
+alle Arrays eindeutig oder liefert `runtimeParams()` `{}`, entfällt der zweite
+JEV-Call ebenfalls. Leere Arrays sind ungültig.
+
+Die ausgewählten Werte werden unter unveränderten Keys in `args` abgelegt und
+sind dieselben Objektinstanzen, die `runtimeParams()` zurückgegeben hat. `args`
+bleibt bewusst dynamisch typisiert; zwischen dem Return-Typ von `runtimeParams()`
+und `args` gibt es keine automatische TypeScript-Inferenz.
+
+### Context und State
+
 `context` wird aus `contextSchema` inferiert und vor jedem Invoke mit Zod validiert.
-Er steht in `runtimeParams()` und als zweiter Parameter von `func()` zur Verfügung,
+Er steht in `runtimeParams()` sowie im einzigen Objektparameter von `func()` zur Verfügung,
 wird aber weder an JEV gesendet noch im Checkpoint oder in Debug-Metadaten gespeichert.
 Damit eignet er sich für Auth-Daten, Session-IDs, Secrets und lokale Konfiguration.
 
-Der Ablauf ist fest begrenzt:
+Der an JEV und Tools übergebene `state` besitzt diese Form:
+
+```ts
+{
+    system_prompt: string,
+    message_history: Array<{
+        role: "user" | "assistant" | "system",
+        content: JevEntry,
+    }>,
+}
+```
+
+Die aktuelle Anfrage wird vor der Auswahl als neuester `user`-Eintrag an
+`message_history` angehängt. Bei einem Checkpointer enthält die History zusätzlich
+die vorherigen Requests und Tool-Ergebnisse des Threads. Es gibt keinen separaten
+`user_request`-State, sodass JEV nur eine chronologische Nachrichtenquelle auswertet.
+
+### Ablauf und Anzahl der JEV-Calls
 
 ```text
-user_request
-→ JEV wählt ein Tool
+invoke({...request})
+→ aktuelle Anfrage wird an message_history angehängt
+→ JEV-Call 1 wählt genau ein Tool
 → runtimeParams() nur dieses Tools
 → liefert pro Parameter ein Array erlaubter Runtime-Werte
-→ JEV wählt für alle mehrdeutigen Parameter parallel je ein Array-Element
-→ JevToolCaller baut { parameterKey: ausgewähltes Originalelement }
-→ func(args, runtimeContext) wird einmal ausgeführt
+→ optionaler JEV-Call 2 wählt für alle mehrdeutigen Parameter parallel je ein Element
+→ JevToolCaller baut args = { parameterKey: ausgewähltes Originalelement }
+→ func({ context, state, thread_id, args }) wird einmal ausgeführt
 → der Return von func() ist der Return von invoke()
 ```
 
-Parameter mit genau einem Candidate werden deterministisch ohne zweiten JEV-Call
-übernommen. Eine leere Candidate-Liste wirft einen Fehler. Tools ohne
-`runtimeParams()` werden direkt mit `{}` ausgeführt. Mit `debug: true` enthält die
-Antwort zusätzlich Tool-/Parameter-Entscheidungen, summierte Usage, Argumente und
-den verwendeten State. Bei einem `checkpointer` ist `thread_id` verpflichtend.
+Der erste JEV-Call findet immer statt. Der zweite findet nur statt, wenn das
+gewählte Tool mindestens einen Runtime-Parameter mit mehr als einem Candidate hat.
+
+### `invoke()` und Debug-Metadaten
+
+Alle Felder außer `context`, `thread_id`, `debug` und `signal` bilden gemeinsam die
+aktuelle User-Anfrage. Sie müssen JSON-serialisierbar sein:
+
+```ts
+const result = await caller.invoke({
+    question: "Welcher Kandidat wurde 2002 geboren?",
+    locale: "de-DE",
+    context: { tenantId: "acme", apiToken: "..." },
+    thread_id: "u1",
+    signal: AbortSignal.timeout(10_000),
+})
+```
+
+Mit `debug: true` kommt statt des direkten Tool-Returns ein Objekt zurück:
+
+```ts
+const output = await caller.invoke({
+    question: "Welcher Kandidat wurde 2002 geboren?",
+    context,
+    debug: true,
+})
+
+output.result
+output.metadata.selected_tool
+output.metadata.selected_params
+output.metadata.arguments
+output.metadata.usage // summiert über alle JEV-Calls
+output.metadata.state
+```
+
+`context` erscheint absichtlich weder im JEV-State noch in Debug-Metadaten oder
+Checkpoints. `signal` bricht die JEV-Requests ab.
+
+### Memory mit Checkpointer
+
+Mit `checkpointer` ist `thread_id` verpflichtend. Nach erfolgreicher Ausführung
+werden die aktuelle User-Anfrage sowie Toolname, gewählte Argumente und Tool-Return
+gespeichert. Beim nächsten Invoke desselben Threads stehen sie in
+`state.message_history` zur Verfügung:
+
+```ts
+const caller = new JevToolCaller({
+    prompt: "Choose the best tool.",
+    tools,
+    checkpointer: new MemorySaver(),
+})
+
+await caller.invoke({ request: "...", thread_id: "customer-42" })
+```
+
+### MCP-Tools
+
+`mcpServer` akzeptiert dieselbe Basis-Konfiguration wie `Agent` und `DeepAgent`:
+einen Server oder ein Array aus `{ name, url, auth?, headers?, description? }`.
+Der LangChain-`MultiServerMCPClient` wird pro `invoke()` erstellt, seine Tools
+werden geladen und die Verbindung wird anschließend auch bei Fehlern geschlossen.
+Die Namen werden immer als `<server>__<tool>` präfixiert, zum Beispiel
+`hubspot__get_candidate`.
+
+Ein MCP-Tool ohne konfigurierte Runtime-Parameter wird direkt mit `args: {}`
+aufgerufen. Benötigt es Argumente, werden die Candidate-Provider am jeweiligen
+Server unter dem **unpräfixierten** MCP-Toolnamen eingetragen:
+
+```ts
+const caller = new JevToolCaller({
+    prompt: "Select the CRM operation that fulfills the latest user message.",
+    tools: [],
+    contextSchema,
+    mcpServer: {
+        name: "hubspot",
+        url: process.env.HUBSPOT_MCP_URL!,
+        headers: {
+            Authorization: `Bearer ${process.env.HUBSPOT_MCP_TOKEN}`,
+        },
+        description: "CRM for candidates, contacts, companies, and deals.",
+        runtimeParams: {
+            // MCP-Name vor dem Prefix; geladen wird hubspot__get_candidate.
+            get_candidate: async ({ context, state, thread_id, server }) => ({
+                candidate: await loadCandidates(context.tenantId),
+            }),
+        },
+    },
+})
+
+const result = await caller.invoke({
+    request: "Hole den 2002 geborenen Max Müller.",
+    context,
+})
+```
+
+Der Runtime-Provider erhält zusätzlich `server`, also die zugehörige
+MCP-Serverkonfiguration. `auth`, Header und `context` bleiben lokal; an JEV gehen
+nur State, Toolbeschreibungen und die ausdrücklich zurückgegebenen Candidate-Werte.
+Die `description` des Servers wird der Beschreibung seiner MCP-Tools vorangestellt,
+damit JEV den fachlichen Zweck des Servers bei der Tool-Auswahl berücksichtigen kann.
+
+Da MCP-Tools dynamisch geladen werden, ist der `invoke()`-Return bei aktivem
+`mcpServer` als `unknown` typisiert. Lokale Tool-Returns bleiben ohne MCP aus den
+jeweiligen `func()`-Returns inferiert.
+
+Weitere Details zum zugrunde liegenden Client:
+
+- [LangChain MCP](https://docs.langchain.com/oss/javascript/langchain/mcp)
+- [LangChain.js MCP Adapters](https://github.com/langchain-ai/langchainjs/tree/main/libs/langchain-mcp-adapters)
+
+### Validierung und typische Fehler
+
+- Mindestens ein lokales oder per MCP verfügbares Tool ist erforderlich.
+- Toolnamen und MCP-Servernamen müssen eindeutig und nicht leer sein.
+- `description` darf bei lokalen Tools nicht leer sein.
+- `runtimeParams()` muss ein Objekt aus Candidate-Arrays liefern.
+- `context` darf nur gesetzt werden, wenn `contextSchema` konfiguriert ist.
+- Mit `checkpointer` muss `thread_id` gesetzt sein.
+- Tools ohne `runtimeParams()` erhalten immer `args: {}` und erzeugen keinen zweiten JEV-Call.
+
+Ein leeres Candidate-Array ist ein erwartbarer fachlicher Ausgang, beispielsweise
+wenn eine Suche keine Kandidaten findet. Da das Tool ohne gültigen Wert nicht
+ausgeführt werden kann, wirft `invoke()` dafür einen `JevNoParamOptionsError`:
+
+```ts
+import { JevNoParamOptionsError } from "@delofarag/ai-utils"
+
+try {
+    await caller.invoke({ request: "Finde Max Müller" })
+} catch (error) {
+    if (error instanceof JevNoParamOptionsError) {
+        showEmptyState(error.toolName, error.parameterName)
+    }
+}
+```
+
+Der stabile Code `JEV_NO_PARAM_OPTIONS` kann alternativ an API-Grenzen für das
+Frontend verwendet werden. Ungültige `runtimeParams()`-Returns, etwa ein Wert,
+der kein Array ist, bleiben `TypeError`, da sie Implementierungsfehler sind.
 
 ## 1) `Chain`
 

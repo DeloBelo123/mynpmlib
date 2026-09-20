@@ -17,7 +17,8 @@ const caller = new JevToolCaller({
                 const token: string = context.auth.token
                 return { id: [sessionId, token] }
             },
-            func: async ({ id }, { context }) => {
+            func: async ({ args, context }) => {
+                const { id } = args
                 const sessionId: string = context.sessionId
                 return `${sessionId}:${String(id)}`
             },
@@ -28,7 +29,8 @@ const caller = new JevToolCaller({
             runtimeParams: async () => ({
                 user: [{ name: "Jeff", age: 12 }],
             }),
-            func: async ({ user }) => {
+            func: async ({ args }) => {
+                const { user } = args
                 return `${user.name}:${user.age}`
             },
         },
@@ -39,6 +41,33 @@ caller.invoke({
     request: "lookup",
     context: { sessionId: "s1", auth: { token: "secret" } },
 })
+
+const mcpCaller = new JevToolCaller({
+    prompt: "Choose an MCP tool.",
+    contextSchema,
+    tools: [],
+    mcpServer: {
+        name: "hubspot",
+        url: "https://example.com/mcp",
+        runtimeParams: {
+            get_candidate: async ({ context, state, thread_id, server }) => {
+                const sessionId: string = context.sessionId
+                const serverName: string = server.name
+                void state
+                void thread_id
+                return {
+                    candidate: [{ id: sessionId, source: serverName }],
+                }
+            },
+        },
+    },
+})
+
+const mcpResult: Promise<unknown> = mcpCaller.invoke({
+    request: "lookup",
+    context: { sessionId: "s1", auth: { token: "secret" } },
+})
+void mcpResult
 
 // @ts-expect-error Context is required when contextSchema is configured.
 caller.invoke({ request: "lookup" })
@@ -55,10 +84,19 @@ const callerWithoutContext = new JevToolCaller({
         {
             name: "ping",
             description: "Returns pong.",
-            func: async () => "pong" as const,
+            func: async ({ args, context, state, thread_id }) => {
+                const noContext: undefined = context
+                void args
+                void state
+                void thread_id
+                return "pong" as const
+            },
         },
     ],
 })
+
+const pingResult: Promise<"pong"> = callerWithoutContext.invoke({ request: "ping" })
+void pingResult
 
 // @ts-expect-error Context cannot be supplied without contextSchema.
 callerWithoutContext.invoke({ request: "ping", context: {} })
