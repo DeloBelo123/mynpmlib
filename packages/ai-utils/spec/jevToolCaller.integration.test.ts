@@ -14,7 +14,7 @@ test(
         const secret = "integration-secret-that-must-stay-local"
         const redProduct = { sku: "RED-11", title: "Red product" }
         const blueProduct = { sku: "BLUE-42", title: "Blue product" }
-        let unusedRuntimeParamsCalled = false
+        let unusedParamsCalled = false
         let receivedProduct: unknown
 
         globalThis.fetch = async (input, init) => {
@@ -39,12 +39,12 @@ test(
                     {
                         name: "find_product",
                         description: "Finds and returns a product by its requested SKU.",
-                        runtimeParams: async ({ context }) => {
+                        params: async ({ context }) => {
                             assert.equal(context.tenantId, "tenant-acme")
                             return { product: [redProduct, blueProduct] }
                         },
-                        func: async ({ args, context }) => {
-                            const { product } = args
+                        func: async ({ params, context }) => {
+                            const { product } = params
                             receivedProduct = product
                             return {
                                 selectedSku: product.sku,
@@ -56,11 +56,11 @@ test(
                     {
                         name: "get_weather",
                         description: "Returns the current weather for a requested city.",
-                        runtimeParams: async () => {
-                            unusedRuntimeParamsCalled = true
+                        params: async () => {
+                            unusedParamsCalled = true
                             return { location: ["Berlin", "Hamburg"] }
                         },
-                        func: async ({ args }) => args.location,
+                        func: async ({ params }) => params.location,
                     },
                 ],
             })
@@ -81,7 +81,7 @@ test(
                 tenantId: "tenant-acme",
                 authorized: true,
             })
-            assert.equal(unusedRuntimeParamsCalled, false)
+            assert.equal(unusedParamsCalled, false)
             assert.equal(requestBodies.length, 2)
             assert.equal(requestBodies.some(body => body.includes(secret)), false)
 

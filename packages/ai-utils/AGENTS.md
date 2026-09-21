@@ -9,6 +9,7 @@ Kurzreferenz für Entwicklung und AI-Assistenten in `@delofarag/ai-utils`.
 | `Chain` | `src/heart/chain.ts` | Stateless LLM-Calls mit Zod-Output, optional RAG |
 | `classify` | `src/helpers/classify.ts` | Typisierte JEV-Klassifikation (`noul`, `choice`, `score`) über OpenRouter |
 | `JevToolCaller` | `src/heart/jevToolCaller.ts` | Bounded JEV-Tool- und Runtime-Parameter-Auswahl ohne generiertes Argument-Schema |
+| JEV-Helper | `src/helpers/jev/` | Öffentliche Typen, Fehler und interne Hilfsfunktionen für `JevToolCaller` |
 | `Agent` | `src/heart/agent.ts` | Tool-using ReAct-Agent, optional Checkpointer + strukturierter Output |
 | `DeepAgent` | `src/heart/deepAgent.ts` | LangChain Deep Agent (Filesystem, Subagents, Sandboxes) |
 | Checkpointer | `src/helpers/memory.ts` | Checkpoint-Saver (Supabase, Smart-Summary) |
@@ -74,19 +75,20 @@ await deepAgent.invoke({ input: "Analysiere das Projekt.", thread_id: "u1" })
 | Runtime | prompt pipe / RAG | eine Tool-Wahl + optionale bounded Parameter-Wahl | `createReactAgent` | `createDeepAgent` |
 | Tools | nein | exakt eins pro Invoke | ja | ja + built-in fs/planning/subagents |
 | Thread-State | nein | optional via `checkpointer` | optional via `checkpointer` | optional via `checkpointer` |
-| Argumente | — | nur Originalwerte aus `runtimeParams()` | generiert aus Tool-Schema | generiert aus Tool-Schema |
+| Argumente | — | nur Originalwerte aus `params` | generiert aus Tool-Schema | generiert aus Tool-Schema |
 | ReAct / Planning | nein | nein | ReAct | ja |
 | Stream | ja (Text) | nein | ja (Text) | ja (Text) |
 
 `JevToolCaller.contextSchema` typisiert und validiert lokalen Execution-Context für
-`runtimeParams()` und `func()`. Dieser Context darf Auth, Session-IDs oder Secrets
+die dynamische `params`-Funktion und `func()`. Dieser Context darf Auth, Session-IDs oder Secrets
 enthalten und wird deshalb nie an JEV gesendet oder in Checkpoints/Debug-Metadaten gespeichert.
-`func()` erhält genau `{ context, state, thread_id, args }`. Runtime-Keys bleiben
-unverändert; ausgewählte Originalelemente stehen unter `args[key]`. Ohne
-`runtimeParams()` wird das gewählte Tool direkt mit `args: {}` ausgeführt.
+`func()` erhält genau `{ context, state, thread_id, params }`. Runtime-Keys bleiben
+unverändert; ausgewählte Originalelemente stehen unter `params[key]`. Ohne
+Tool-`params` wird das gewählte Tool direkt mit `params: {}` ausgeführt. `params` kann
+direkt ein statisches Candidate-Objekt oder eine synchrone/asynchrone Funktion sein.
 Die aktuelle Anfrage ist der neueste `user`-Eintrag in `state.message_history`.
-`mcpServer` lädt zusätzlich präfixierte `<server>__<tool>`-Tools; optionale
-Candidate-Provider stehen unter `mcpServer.runtimeParams[unprefixedToolName]`.
+`mcpServer` lädt zusätzlich präfixierte `<server>__<tool>`-Tools; optionale statische
+Choices oder Candidate-Provider stehen unter `mcpServer.params[unprefixedToolName]`.
 
 ## Tool-Registry
 

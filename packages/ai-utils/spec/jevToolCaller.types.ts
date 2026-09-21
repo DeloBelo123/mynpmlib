@@ -12,13 +12,16 @@ const caller = new JevToolCaller({
         {
             name: "lookup",
             description: "Looks up a value.",
-            runtimeParams: async ({ context }) => {
+            params: async ({ context }) => {
                 const sessionId: string = context.sessionId
                 const token: string = context.auth.token
                 return { id: [sessionId, token] }
             },
-            func: async ({ args, context }) => {
-                const { id } = args
+            func: async input => {
+                const { params, context } = input
+                // @ts-expect-error Tool functions expose selected values as params, not args.
+                void input.args
+                const { id } = params
                 const sessionId: string = context.sessionId
                 return `${sessionId}:${String(id)}`
             },
@@ -26,11 +29,11 @@ const caller = new JevToolCaller({
         {
             name: "get_user",
             description: "Returns a user.",
-            runtimeParams: async () => ({
+            params: {
                 user: [{ name: "Jeff", age: 12 }],
-            }),
-            func: async ({ args }) => {
-                const { user } = args
+            },
+            func: async ({ params }) => {
+                const { user } = params
                 return `${user.name}:${user.age}`
             },
         },
@@ -49,7 +52,10 @@ const mcpCaller = new JevToolCaller({
     mcpServer: {
         name: "hubspot",
         url: "https://example.com/mcp",
-        runtimeParams: {
+        params: {
+            list_candidates: {
+                limit: [{ value: 10 }, { value: 25 }, { value: 50 }],
+            },
             get_candidate: async ({ context, state, thread_id, server }) => {
                 const sessionId: string = context.sessionId
                 const serverName: string = server.name
@@ -69,6 +75,13 @@ const mcpResult: Promise<unknown> = mcpCaller.invoke({
 })
 void mcpResult
 
+// @ts-expect-error MCP tools are dynamic, so their result must remain unknown.
+const invalidMcpResult: Promise<string> = mcpCaller.invoke({
+    request: "lookup",
+    context: { sessionId: "s1", auth: { token: "secret" } },
+})
+void invalidMcpResult
+
 // @ts-expect-error Context is required when contextSchema is configured.
 caller.invoke({ request: "lookup" })
 
@@ -79,14 +92,13 @@ caller.invoke({
 })
 
 const callerWithoutContext = new JevToolCaller({
-    prompt: "Choose a tool.",
     tools: [
         {
             name: "ping",
             description: "Returns pong.",
-            func: async ({ args, context, state, thread_id }) => {
+            func: async ({ params, context, state, thread_id }) => {
                 const noContext: undefined = context
-                void args
+                void params
                 void state
                 void thread_id
                 return "pong" as const

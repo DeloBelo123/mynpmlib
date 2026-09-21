@@ -15,7 +15,7 @@ test("selects the correct tool and original runtime value without exposing conte
     const selectedProduct = { sku: "BLUE-42", title: "Blue product" }
     const otherProduct = { sku: "RED-11", title: "Red product" }
     const secret = "local-secret-that-must-not-reach-jev"
-    let unusedRuntimeParamsCalled = false
+    let unusedParamsCalled = false
     let runtimeContextReference: unknown
     let funcContextReference: unknown
     let receivedProduct: unknown
@@ -65,13 +65,13 @@ test("selects the correct tool and original runtime value without exposing conte
                 {
                     name: "find_product",
                     description: "Finds and returns a product by its requested SKU.",
-                    runtimeParams: async runtimeContext => {
+                    params: async runtimeContext => {
                         runtimeContextReference = runtimeContext
                         assert.equal(runtimeContext.context.tenantId, "tenant-acme")
                         return { product: [otherProduct, selectedProduct] }
                     },
                     func: async input => {
-                        const { product } = input.args
+                        const { product } = input.params
                         funcContextReference = input
                         receivedProduct = product
                         return {
@@ -83,11 +83,11 @@ test("selects the correct tool and original runtime value without exposing conte
                 {
                     name: "get_weather",
                     description: "Returns weather information for a city.",
-                    runtimeParams: async () => {
-                        unusedRuntimeParamsCalled = true
+                    params: async () => {
+                        unusedParamsCalled = true
                         return { location: ["Berlin"] }
                     },
-                    func: async ({ args }) => args.location,
+                    func: async ({ params }) => params.location,
                 },
             ],
         })
@@ -99,7 +99,7 @@ test("selects the correct tool and original runtime value without exposing conte
         })
 
         assert.equal(requestBodies.length, 2)
-        assert.equal(unusedRuntimeParamsCalled, false)
+        assert.equal(unusedParamsCalled, false)
         assert.equal(receivedProduct, selectedProduct)
         assert.equal(
             (runtimeContextReference as { state: unknown }).state,
@@ -133,7 +133,7 @@ test("selects the correct tool and original runtime value without exposing conte
     }
 })
 
-test("executes a tool without runtimeParams directly with an empty args object", async () => {
+test("executes a tool without params directly with an empty function params object", async () => {
     const originalFetch = globalThis.fetch
     const originalApiKey = process.env.OPENROUTER_API_KEY
     process.env.OPENROUTER_API_KEY = "test-key"
@@ -159,7 +159,6 @@ test("executes a tool without runtimeParams directly with an empty args object",
     try {
         const contextSchema = z.object({ sessionId: z.string() })
         const caller = new JevToolCaller({
-            prompt: "Choose a tool.",
             contextSchema,
             tools: [{
                 name: "ping",
@@ -178,12 +177,82 @@ test("executes a tool without runtimeParams directly with an empty args object",
 
         assert.equal(result, "pong:s1")
         assert.equal(calls, 1)
-        assert.deepEqual(toolInput?.args, {})
+        assert.deepEqual(toolInput?.params, {})
         assert.equal(toolInput?.thread_id, undefined)
+        assert.equal(
+            toolInput?.state.system_prompt,
+            "Treat the latest user message as the current request and earlier messages only as context. Select the available tool that best fulfills the request.",
+        )
         assert.deepEqual(toolInput?.state.message_history.at(-1), {
             role: "user",
             content: { request: "ping" },
         })
+    } finally {
+        globalThis.fetch = originalFetch
+        if (originalApiKey === undefined) {
+            delete process.env.OPENROUTER_API_KEY
+        } else {
+            process.env.OPENROUTER_API_KEY = originalApiKey
+        }
+    }
+})
+
+test("selects an argument from a static params object", async () => {
+    const originalFetch = globalThis.fetch
+    const originalApiKey = process.env.OPENROUTER_API_KEY
+    process.env.OPENROUTER_API_KEY = "test-key"
+    let calls = 0
+
+    globalThis.fetch = async () => {
+        calls++
+        const response = calls === 1
+            ? {
+                  answers: {
+                      tool: {
+                          type: "choice",
+                          choice: "take_action",
+                          confidence: 1,
+                          probabilities: { take_action: 1 },
+                      },
+                  },
+                  model: "jev-test",
+                  usage: { input_tokens: 4, output_tokens: 1 },
+              }
+            : {
+                  answers: {
+                      permission: {
+                          type: "choice",
+                          choice: "option_1",
+                          confidence: 1,
+                          probabilities: { option_0: 0, option_1: 1 },
+                      },
+                  },
+                  model: "jev-test",
+                  usage: { input_tokens: 3, output_tokens: 1 },
+              }
+        return new Response(JSON.stringify(response), { status: 200 })
+    }
+
+    try {
+        const caller = new JevToolCaller({
+            prompt: "Choose an action.",
+            tools: [{
+                name: "take_action",
+                description: "Takes an action with the selected permission.",
+                params: { permission: ["read", "write"] },
+                func: async ({ params }) => params.permission,
+            }],
+        })
+
+        const output = await caller.invoke({
+            request: "Write the update.",
+            debug: true,
+        })
+
+        assert.equal(output.result, "write")
+        assert.equal(output.metadata.arguments.permission, "write")
+        assert.equal(output.metadata.usage.calls, 2)
+        assert.equal(calls, 2)
     } finally {
         globalThis.fetch = originalFetch
         if (originalApiKey === undefined) {
@@ -226,7 +295,7 @@ test("throws JevNoParamOptionsError before parameter selection, tool execution, 
             tools: [{
                 name: "find_candidate",
                 description: "Finds a candidate.",
-                runtimeParams: async () => ({ candidate: [] }),
+                params: { candidate: [] },
                 func: async () => {
                     funcCalled = true
                     return { found: true }
@@ -290,7 +359,7 @@ test("keeps malformed runtime parameter values as TypeError", async () => {
             tools: [{
                 name: "find_candidate",
                 description: "Finds a candidate.",
-                runtimeParams: (async () => ({ candidate: "not-an-array" })) as any,
+                params: { candidate: "not-an-array" } as any,
                 func: async () => ({ found: true }),
             }],
         })
@@ -317,7 +386,7 @@ test("keeps malformed runtime parameter values as TypeError", async () => {
     }
 })
 
-test("adapts prefixed MCP tools and applies runtimeParams from their server", async () => {
+test("adapts prefixed MCP tools and applies params from their server", async () => {
     const candidate = { id: "candidate-1", name: "Max" }
     let receivedServerName: string | undefined
     let invokedArgs: unknown
@@ -330,12 +399,13 @@ test("adapts prefixed MCP tools and applies runtimeParams from their server", as
             name: "hubspot",
             url: "https://example.com/mcp",
             description: "CRM server.",
-            runtimeParams: {
+            params: {
                 get_candidate: async ({ context, server }) => {
                     assert.equal(context.tenantId, "tenant-acme")
                     receivedServerName = server.name
                     return { candidate: [candidate] }
                 },
+                list_candidates: { limit: [{ value: 25 }] },
             },
         },
     })
@@ -347,15 +417,22 @@ test("adapts prefixed MCP tools and applies runtimeParams from their server", as
             return { ok: true }
         },
     }
+    const fakeStaticMcpTool = {
+        name: "hubspot__list_candidates",
+        description: "Lists candidates.",
+        invoke: async (args: unknown) => args,
+    }
     const adapter = caller as unknown as {
         adaptMcpTools(tools: readonly unknown[]): Array<{
             name: string
             description: string
-            runtimeParams?: (context: any) => Promise<Record<string, readonly unknown[]>>
+            params?:
+                | Record<string, readonly unknown[]>
+                | ((context: any) => Promise<Record<string, readonly unknown[]>>)
             func(input: any): Promise<unknown>
         }>
     }
-    const [tool] = adapter.adaptMcpTools([fakeMcpTool])
+    const [tool, staticTool] = adapter.adaptMcpTools([fakeMcpTool, fakeStaticMcpTool])
     const state = {
         system_prompt: "Choose a tool.",
         message_history: [{ role: "user" as const, content: { request: "Max" } }],
@@ -368,10 +445,17 @@ test("adapts prefixed MCP tools and applies runtimeParams from their server", as
 
     assert.equal(tool.name, "hubspot__get_candidate")
     assert.equal(tool.description, "CRM server.\nGets one candidate.")
-    assert.deepEqual(await tool.runtimeParams?.(runtimeContext), { candidate: [candidate] })
+    assert.equal(typeof tool.params, "function")
+    if (typeof tool.params !== "function") throw new TypeError("Expected dynamic params")
+    assert.deepEqual(await tool.params(runtimeContext), { candidate: [candidate] })
     assert.equal(receivedServerName, "hubspot")
-    assert.deepEqual(await tool.func({ ...runtimeContext, args: { candidate } }), { ok: true })
+    assert.deepEqual(await tool.func({ ...runtimeContext, params: { candidate } }), { ok: true })
     assert.deepEqual(invokedArgs, { candidate })
+    assert.deepEqual(staticTool.params, { limit: [{ value: 25 }] })
+    assert.deepEqual(
+        await staticTool.func({ ...runtimeContext, params: { limit: { value: 25 } } }),
+        { limit: { value: 25 } },
+    )
 })
 
 test("rejects invalid context before making a JEV request", async () => {
