@@ -129,10 +129,30 @@ export type JevToolReturn<TTools extends readonly AnyJevTool[]> = TTools[number]
     ? Awaited<TResult>
     : never
 
-export type JevToolCallerReturn<
+/** Confidence values exposed on every successful `invoke()` result. */
+export interface JevToolCallerConfidence {
+    /** Confidence of the initial tool selection. */
+    toolChoice: number
+    /** Confidence per parameter that required a JEV choice. */
+    paramsChoice?: Readonly<Record<string, number>>
+}
+
+/** Stable result shape returned by `invoke()` with and without debug mode. */
+export interface JevToolCallerResult<TResult> {
+    value: TResult
+    confidence: JevToolCallerConfidence
+}
+
+/** @internal The raw value produced by the selected tool. */
+export type JevToolCallerValue<
     TTools extends readonly AnyJevTool[],
     THasMcp extends boolean,
 > = THasMcp extends true ? unknown : JevToolReturn<TTools>
+
+export type JevToolCallerReturn<
+    TTools extends readonly AnyJevTool[],
+    THasMcp extends boolean,
+> = JevToolCallerResult<JevToolCallerValue<TTools, THasMcp>>
 
 export type JevToolCallerHasMcp<TConfig> =
     "mcpServer" extends keyof TConfig ? true : false
@@ -141,6 +161,12 @@ export type JevToolCallerResolvedReturn<
     TTools extends readonly AnyJevTool[],
     TConfig,
 > = JevToolCallerReturn<TTools, JevToolCallerHasMcp<TConfig>>
+
+/** @internal Raw selected-tool value resolved from the caller configuration. */
+export type JevToolCallerResolvedValue<
+    TTools extends readonly AnyJevTool[],
+    TConfig,
+> = JevToolCallerValue<TTools, JevToolCallerHasMcp<TConfig>>
 
 export interface JevToolCallerSelectionMetadata {
     choice: string
@@ -155,8 +181,7 @@ export interface JevToolCallerUsage {
     cost?: number
 }
 
-export interface JevToolCallerDebugResult<TResult> {
-    result: TResult
+export interface JevToolCallerDebugResult<TResult> extends JevToolCallerResult<TResult> {
     metadata: {
         selected_tool: {
             name: string

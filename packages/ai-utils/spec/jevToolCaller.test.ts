@@ -105,9 +105,13 @@ test("selects the correct tool and original runtime value without exposing conte
             (runtimeContextReference as { state: unknown }).state,
             (funcContextReference as { state: unknown }).state,
         )
-        assert.deepEqual(output.result, {
+        assert.deepEqual(output.value, {
             product: selectedProduct,
             tenantId: "tenant-acme",
+        })
+        assert.deepEqual(output.confidence, {
+            toolChoice: 0.99,
+            paramsChoice: { product: 0.98 },
         })
         assert.equal(output.metadata.selected_tool.name, "find_product")
         assert.equal(output.metadata.selected_params.product.choice, "option_1")
@@ -175,7 +179,10 @@ test("executes a tool without params directly with an empty function params obje
             context: { sessionId: "s1" },
         })
 
-        assert.equal(result, "pong:s1")
+        assert.deepEqual(result, {
+            value: "pong:s1",
+            confidence: { toolChoice: 1 },
+        })
         assert.equal(calls, 1)
         assert.deepEqual(toolInput?.params, {})
         assert.equal(toolInput?.thread_id, undefined)
@@ -246,12 +253,13 @@ test("selects an argument from a static params object", async () => {
 
         const output = await caller.invoke({
             request: "Write the update.",
-            debug: true,
         })
 
-        assert.equal(output.result, "write")
-        assert.equal(output.metadata.arguments.permission, "write")
-        assert.equal(output.metadata.usage.calls, 2)
+        assert.equal(output.value, "write")
+        assert.deepEqual(output.confidence, {
+            toolChoice: 1,
+            paramsChoice: { permission: 1 },
+        })
         assert.equal(calls, 2)
     } finally {
         globalThis.fetch = originalFetch

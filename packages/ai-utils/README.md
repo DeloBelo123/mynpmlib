@@ -306,7 +306,7 @@ const caller = new JevToolCaller({
     checkpointer: new MemorySaver(),
 })
 
-const candidate = await caller.invoke({
+const output = await caller.invoke({
     Frage: "Welcher Max Müller wurde 2002 geboren?",
     thread_id: "u1",
     context: {
@@ -314,9 +314,13 @@ const candidate = await caller.invoke({
         apiToken: process.env.RECRUITING_API_TOKEN!,
     },
 })
+
+console.log(output.value)
+console.log(output.confidence.toolChoice)
 ```
 
-`candidate` ist nur ein Beispiel. Tool-Namen, Parameter-Keys, Candidate-Werte und
+`output.value` ist hier ein Candidate; das ist nur ein Beispiel.
+Tool-Namen, Parameter-Keys, Candidate-Werte und
 Rückgabetypen sind generisch und enthalten keine domänenspezifische Logik.
 
 ### Tool-Definition
@@ -347,7 +351,7 @@ func: async ({
 `thread_id` keine weiteren Werte, wird es nach der Tool-Auswahl sofort mit
 `params: {}` ausgeführt. Es findet dann kein Parameter-Auswahl-Call an JEV statt.
 
-### Wie Tool-`params` zu `func().params` werden
+### Wie Tool-`params` zu `func() params` werden
 
 `params` wird erst ausgewertet, nachdem JEV ein Tool ausgewählt hat. Für feste
 Auswahlmöglichkeiten kann direkt ein Objekt angegeben werden:
@@ -436,13 +440,13 @@ invoke({...request})
 → optionaler JEV-Call 2 wählt für alle mehrdeutigen Parameter parallel je ein Element
 → JevToolCaller baut params = { parameterKey: ausgewähltes Originalelement }
 → func({ context, state, thread_id, params }) wird einmal ausgeführt
-→ der Return von func() ist der Return von invoke()
+→ invoke() gibt { value: funcReturn, confidence } zurück
 ```
 
 Der erste JEV-Call findet immer statt. Der zweite findet nur statt, wenn das
 gewählte Tool mindestens einen Runtime-Parameter mit mehr als einem Candidate hat.
 
-### `invoke()` und Debug-Metadaten
+### `invoke()`, Confidence und Debug-Metadaten
 
 Alle Felder außer `context`, `thread_id`, `debug` und `signal` bilden gemeinsam die
 aktuelle User-Anfrage. Sie müssen JSON-serialisierbar sein:
@@ -455,9 +459,31 @@ const result = await caller.invoke({
     thread_id: "u1",
     signal: AbortSignal.timeout(10_000),
 })
+
+result.value
+result.confidence.toolChoice
+result.confidence.paramsChoice?.candidate
 ```
 
-Mit `debug: true` kommt statt des direkten Tool-Returns ein Objekt zurück:
+Jeder erfolgreiche Aufruf liefert unabhängig von `debug` dieselbe Basisform:
+
+```ts
+{
+    value: ToolReturn,
+    confidence: {
+        toolChoice: number,
+        paramsChoice?: Record<string, number>,
+    },
+}
+```
+
+`toolChoice` stammt aus dem ersten, ohnehin ausgeführten JEV-Call. `paramsChoice`
+enthält pro mehrdeutigem Parameter die Confidence aus dem ohnehin erforderlichen
+Parameter-Auswahl-Call. Das Feld fehlt, wenn JEV keine Parameterwahl treffen musste,
+beispielsweise bei einem Tool ohne `params` oder ausschließlich eindeutigen Arrays.
+Für diese Confidence-Werte wird kein zusätzlicher JEV-Call ausgeführt.
+
+Mit `debug: true` kommen zusätzlich die ausführlichen Metadaten hinzu:
 
 ```ts
 const output = await caller.invoke({
@@ -466,7 +492,8 @@ const output = await caller.invoke({
     debug: true,
 })
 
-output.result
+output.value
+output.confidence
 output.metadata.selected_tool
 output.metadata.selected_params
 output.metadata.arguments
@@ -544,9 +571,9 @@ nur State, Toolbeschreibungen und die ausdrücklich zurückgegebenen Candidate-W
 Die `description` des Servers wird der Beschreibung seiner MCP-Tools vorangestellt,
 damit JEV den fachlichen Zweck des Servers bei der Tool-Auswahl berücksichtigen kann.
 
-Da MCP-Tools dynamisch geladen werden, ist der `invoke()`-Return bei aktivem
-`mcpServer` als `unknown` typisiert. Lokale Tool-Returns bleiben ohne MCP aus den
-jeweiligen `func()`-Returns inferiert.
+Da MCP-Tools dynamisch geladen werden, ist `output.value` bei aktivem `mcpServer`
+als `unknown` typisiert. `output.confidence` bleibt vollständig typisiert. Lokale
+Tool-Werte werden ohne MCP aus den jeweiligen `func()`-Returns inferiert.
 
 Weitere Details zum zugrunde liegenden Client:
 

@@ -76,7 +76,7 @@ test(
             assert.equal(output.metadata.selected_tool.name, "find_product")
             assert.equal(output.metadata.selected_params.product.choice, "option_1")
             assert.equal(receivedProduct, blueProduct)
-            assert.deepEqual(output.result, {
+            assert.deepEqual(output.value, {
                 selectedSku: "BLUE-42",
                 tenantId: "tenant-acme",
                 authorized: true,

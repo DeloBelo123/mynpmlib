@@ -26,11 +26,13 @@ import type {
     AnyJevTool,
     JevMCPServersInput,
     JevModel,
+    JevToolCallerConfidence,
     JevToolCallerDebugResult,
     JevToolCallerHistoryEntry,
     JevToolCallerInvokeInput,
     JevToolCallerProps,
     JevToolCallerResolvedReturn,
+    JevToolCallerResolvedValue,
     JevToolCallerSelectionMetadata,
     JevToolCallerState,
     JevToolFunctionInput,
@@ -73,6 +75,13 @@ export * from "../helpers/jev"
  * built-in instruction to treat the latest user message as the current request
  * and select the best available tool is always appended automatically. Without
  * a custom `prompt`, that built-in instruction is the complete system prompt.
+ *
+ * Every successful `invoke()` returns `{ value, confidence }`. `value` is the
+ * selected tool's return value, while `confidence.toolChoice` is the confidence
+ * already reported by the tool-selection JEV call. `confidence.paramsChoice`
+ * maps parameter names to their confidence when JEV had to choose among multiple
+ * candidates. Debug mode adds `metadata` without changing this stable shape or
+ * making additional JEV calls.
  *
  * Internally uses this package's `classify()` utility.
  *
@@ -152,6 +161,7 @@ export * from "../helpers/jev"
  *     request: "Is the EU service available?",
  *     context: { apiKey: process.env.API_KEY!, sessionId: "session-1" },
  * })
+ * console.log(status.value, status.confidence.toolChoice)
  * ```
  *
  * @see https://docs.typesafe.ai/primitives
@@ -215,7 +225,7 @@ export class JevToolCaller<
 
     public async invoke(
         input: JevToolCallerInvokeInput<TContext> & { debug: true },
-    ): Promise<JevToolCallerDebugResult<JevToolCallerResolvedReturn<TTools, TConfig>>>
+    ): Promise<JevToolCallerDebugResult<JevToolCallerResolvedValue<TTools, TConfig>>>
     public async invoke(
         input: JevToolCallerInvokeInput<TContext> & { debug?: false | undefined },
     ): Promise<JevToolCallerResolvedReturn<TTools, TConfig>>
@@ -223,13 +233,13 @@ export class JevToolCaller<
         input: JevToolCallerInvokeInput<TContext>,
     ): Promise<
         | JevToolCallerResolvedReturn<TTools, TConfig>
-        | JevToolCallerDebugResult<JevToolCallerResolvedReturn<TTools, TConfig>>
+        | JevToolCallerDebugResult<JevToolCallerResolvedValue<TTools, TConfig>>
     >
     public async invoke(
         input: JevToolCallerInvokeInput<TContext>,
     ): Promise<
         | JevToolCallerResolvedReturn<TTools, TConfig>
-        | JevToolCallerDebugResult<JevToolCallerResolvedReturn<TTools, TConfig>>
+        | JevToolCallerDebugResult<JevToolCallerResolvedValue<TTools, TConfig>>
     > {
         this.validateThreadConfig(input.thread_id)
         const context = this.parseContext(input.context)
@@ -253,7 +263,7 @@ export class JevToolCaller<
         context: TContext,
     ): Promise<
         | JevToolCallerResolvedReturn<TTools, TConfig>
-        | JevToolCallerDebugResult<JevToolCallerResolvedReturn<TTools, TConfig>>
+        | JevToolCallerDebugResult<JevToolCallerResolvedValue<TTools, TConfig>>
     > {
         const { debug = false, thread_id, signal, context: _context, ...request } = input
 
@@ -392,16 +402,28 @@ export class JevToolCaller<
         const executableTool = selectedTool as unknown as {
             func: (input: JevToolFunctionInput<TContext>) => unknown
         }
-        const result = (await executableTool.func({
+        const value = (await executableTool.func({
             ...runtimeContext,
             params: resolvedParams,
-        })) as JevToolCallerResolvedReturn<TTools, TConfig>
-        await this.saveHistory(thread_id, userRequest, selectedTool.name, resolvedParams, result)
+        })) as JevToolCallerResolvedValue<TTools, TConfig>
+        await this.saveHistory(thread_id, userRequest, selectedTool.name, resolvedParams, value)
 
-        if (!debug) return result
+        const paramsChoice = Object.fromEntries(
+            Object.entries(selectedParamMetadata).map(([name, metadata]) => [
+                name,
+                metadata.confidence,
+            ]),
+        )
+        const confidence: JevToolCallerConfidence = {
+            toolChoice: toolAnswer.confidence,
+            ...(Object.keys(paramsChoice).length > 0 ? { paramsChoice } : {}),
+        }
+        const output = { value, confidence }
+
+        if (!debug) return output
 
         return {
-            result,
+            ...output,
             metadata: {
                 selected_tool: {
                     name: selectedTool.name,

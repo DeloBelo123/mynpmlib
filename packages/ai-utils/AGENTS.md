@@ -89,6 +89,10 @@ direkt ein statisches Candidate-Objekt oder eine synchrone/asynchrone Funktion s
 Die aktuelle Anfrage ist der neueste `user`-Eintrag in `state.message_history`.
 `mcpServer` lädt zusätzlich präfixierte `<server>__<tool>`-Tools; optionale statische
 Choices oder Candidate-Provider stehen unter `mcpServer.params[unprefixedToolName]`.
+`invoke()` gibt immer `{ value, confidence }` zurück. `confidence.toolChoice`
+enthält die Tool-Auswahl-Confidence; `confidence.paramsChoice` enthält optional
+die Confidence pro tatsächlich durch JEV ausgewähltem Parameter. `debug: true`
+ergänzt `metadata`, verändert diese Basisform aber nicht.
 
 ## Tool-Registry
 

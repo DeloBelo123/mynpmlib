@@ -1,5 +1,8 @@
 import { z } from "zod/v4"
-import { JevToolCaller } from "../src/heart/jevToolCaller"
+import {
+    JevToolCaller,
+    type JevToolCallerResult,
+} from "../src/heart/jevToolCaller"
 
 const contextSchema = z.object({
     sessionId: z.string(),
@@ -69,7 +72,7 @@ const mcpCaller = new JevToolCaller({
     },
 })
 
-const mcpResult: Promise<unknown> = mcpCaller.invoke({
+const mcpResult: Promise<JevToolCallerResult<unknown>> = mcpCaller.invoke({
     request: "lookup",
     context: { sessionId: "s1", auth: { token: "secret" } },
 })
@@ -107,7 +110,9 @@ const callerWithoutContext = new JevToolCaller({
     ],
 })
 
-const pingResult: Promise<"pong"> = callerWithoutContext.invoke({ request: "ping" })
+const pingResult: Promise<JevToolCallerResult<"pong">> = callerWithoutContext.invoke({
+    request: "ping",
+})
 void pingResult
 
 // @ts-expect-error Context cannot be supplied without contextSchema.
