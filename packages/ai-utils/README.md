@@ -259,6 +259,8 @@ Wertebereich und JEV wählt daraus ausschließlich vorhandene Originalwerte.
 | `model` | nein | TypeSafe-JEV-Modell, Default: `~typesafe/jev-latest` |
 | `contextSchema` | nein | Zod-Objektschema für lokalen Invoke-Context |
 | `checkpointer` | nein | Persistiert Message-History pro `thread_id` |
+| `interruptOn` | nein | Human-in-the-Loop: Frage pro Tool-Name (String oder Function); pausiert vor `func()`, braucht `checkpointer` |
+| `confidenceGate` | nein | Qualitäts-Gate: `{ minConfidence?, tools?: { [name]: number } }`; immer aktiv, Default-Threshold `0.5` |
 | `mcpServer` | nein | Ein Remote-MCP-Server oder ein Array von Servern |
 
 ### Vollständiges Beispiel
@@ -315,8 +317,9 @@ const output = await caller.invoke({
     },
 })
 
-console.log(output.value)
-console.log(output.confidence.toolChoice)
+if (output.kind === "return" && !output.rejected) {
+    console.log(output.value, output.tool)
+}
 ```
 
 `output.value` ist hier ein Candidate; das ist nur ein Beispiel.
@@ -440,7 +443,7 @@ invoke({...request})
 → optionaler JEV-Call 2 wählt für alle mehrdeutigen Parameter parallel je ein Element
 → JevToolCaller baut params = { parameterKey: ausgewähltes Originalelement }
 → func({ context, state, thread_id, params }) wird einmal ausgeführt
-→ invoke() gibt { value: funcReturn, confidence } zurück
+→ invoke() gibt { kind: "return", value: funcReturn, tool, params } zurück
 ```
 
 Der erste JEV-Call findet immer statt. Der zweite findet nur statt, wenn das
@@ -460,28 +463,30 @@ const result = await caller.invoke({
     signal: AbortSignal.timeout(10_000),
 })
 
-result.value
-result.confidence.toolChoice
-result.confidence.paramsChoice?.candidate
-```
-
-Jeder erfolgreiche Aufruf liefert unabhängig von `debug` dieselbe Basisform:
-
-```ts
-{
-    value: ToolReturn,
-    confidence: {
-        toolChoice: number,
-        paramsChoice?: Record<string, number>,
-    },
+if (result.kind === "return" && !result.rejected) {
+    result.value
+    result.tool // { name, confidence }
+    result.params // { [name]: { value, confidence } }
 }
 ```
 
-`toolChoice` stammt aus dem ersten, ohnehin ausgeführten JEV-Call. `paramsChoice`
-enthält pro mehrdeutigem Parameter die Confidence aus dem ohnehin erforderlichen
-Parameter-Auswahl-Call. Das Feld fehlt, wenn JEV keine Parameterwahl treffen musste,
-beispielsweise bei einem Tool ohne `params` oder ausschließlich eindeutigen Arrays.
-Für diese Confidence-Werte wird kein zusätzlicher JEV-Call ausgeführt.
+Jeder `invoke()`-Return trägt `kind` (`"return"`, `"gated"` oder `"interrupt"`).
+Bei `"return"` gilt immer dieselbe Basisform:
+
+```ts
+{
+    kind: "return",
+    value: ToolReturn, // null + rejected: true bei Reject (func() lief nie)
+    tool: { name: string, confidence: number },
+    params: Record<string, { value: JevEntry, confidence: number }>,
+}
+```
+
+`tool.confidence` stammt aus dem ohnehin ausgeführten Tool-Auswahl-Call.
+`params[name].confidence` stammt aus dem ohnehin erforderlichen
+Parameter-Auswahl-Call — oder ist `1`, wenn der Wert deterministisch war
+(Single-Candidate, kein JEV-Call nötig). Für diese Werte wird kein
+zusätzlicher JEV-Call ausgeführt.
 
 Mit `debug: true` kommen zusätzlich die ausführlichen Metadaten hinzu:
 
@@ -492,13 +497,16 @@ const output = await caller.invoke({
     debug: true,
 })
 
-output.value
-output.confidence
-output.metadata.selected_tool
-output.metadata.selected_params
-output.metadata.arguments
-output.metadata.usage // summiert über alle JEV-Calls
-output.metadata.state
+if (output.kind === "return" && !output.rejected) {
+    output.value
+    output.tool
+    output.params
+    output.metadata.selected_tool
+    output.metadata.selected_params
+    output.metadata.arguments
+    output.metadata.usage // summiert über alle JEV-Calls
+    output.metadata.state
+}
 ```
 
 `context` erscheint absichtlich weder im JEV-State noch in Debug-Metadaten oder
@@ -520,6 +528,78 @@ const caller = new JevToolCaller({
 
 await caller.invoke({ request: "...", thread_id: "customer-42" })
 ```
+
+### Human-in-the-Loop (approve/reject)
+
+Mit `interruptOn` pausiert `JevToolCaller` **vor** der `func()`-Ausführung und
+gibt statt des Ergebnisses einen Interrupt zurück. Die Keys sind Tool-Namen
+(bei MCP: `<server>__<tool>`), der Value ist die Freigabe-Frage als String oder
+als Function mit `{ tool, params, state, thread_id, context }`. Tools ohne
+Eintrag laufen ohne Pause direkt durch. Es gibt nur `approve`/`reject`;
+bei Reject läuft `func()` nie:
+
+```ts
+const caller = new JevToolCaller({
+    tools,
+    checkpointer: new MemorySaver(),
+    interruptOn: {
+        delete_customer: "Kunde wirklich löschen?",
+        send_refund: ({ params }) => `Refund über ${params.amount} freigeben?`,
+    },
+})
+
+const res = await caller.invoke({ request: "...", thread_id: "customer-42" })
+if (res.kind === "interrupt") {
+    // res.question, res.tool, res.params in der UI anzeigen, dann:
+    const out = await caller.invoke({ thread_id: "customer-42", decision: "approve" })
+    // out = { kind: "return", value, tool, params } oder bei Reject
+    // { kind: "return", value: null, rejected: true, tool, params }
+}
+```
+
+Der Vorschlag wird im Checkpointer unter `thread_id` geparkt — zwischen
+Propose und Resume darf der Prozess enden. `context` wird nie persistiert und
+muss beim Resume erneut übergeben werden. `decision` und Anfrage-Felder
+gleichzeitig sind ein Fehler; ein neuer Propose-Call überschreibt ein noch
+offenes Pending. Konfigurierte Keys, die kein lokales oder geladenes MCP-Tool
+treffen, geben einen `console.warn` aus (Tippfehler-Falle bei freien Strings).
+
+### Qualitäts-Gate (Confidence)
+
+Der Gate ist immer aktiv — auch ohne Config. Effektiver Threshold pro Tool:
+`confidenceGate.tools[name] ?? confidenceGate.minConfidence ?? 0.5`.
+Unterschreitet die Tool- oder eine Param-Confidence den Threshold, wird `func()`
+nicht ausgeführt und `invoke()` gibt den Vorschlag zur Klärung zurück:
+
+```ts
+const res = await caller.invoke({ request: "...", thread_id: "customer-42" })
+if (res.kind === "gated") {
+    // res.tool, res.params, res.below: [{ scope: "tool" | "params.<name>", confidence, required }]
+    // → gezielt nachfragen und erneut invoken, oder bewusst übersteuern:
+    const out = await caller.callTool({
+        request: "...",
+        thread_id: "customer-42",
+        context,
+        tool: res.tool.name,
+        params: Object.fromEntries(Object.entries(res.params).map(([k, v]) => [k, v.value])),
+    })
+}
+```
+
+`minConfidence: 0` schaltet den Gate faktisch ab. Der Gate läuft vor
+`interruptOn`: Was automatisch abgelehnt wird, wird keinem Menschen vorgelegt.
+Deterministische Single-Candidate-Params tragen Confidence `1`
+(keine Alternative vorhanden, kein JEV-Call).
+
+### Manueller Aufruf mit `callTool()`
+
+`callTool({ request..., thread_id, context, tool, params })` führt ein Tool
+ohne JEV-Auswahl aus — mit identischer State-/History-Semantik wie `invoke()`.
+`params` werden gegen die Tool-Candidates validiert (bounded): unbekannte Keys,
+fehlende Keys oder Werte außerhalb der Candidates werfen einen `TypeError`.
+Gate und `interruptOn` werden bewusst umgangen (Override-Semantik).
+Der Tool-Name ist als Union der lokalen Namen typisiert; MCP-Tools gehen per
+präfixiertem `<server>__<tool>`-Namen.
 
 ### MCP-Tools
 
@@ -571,9 +651,10 @@ nur State, Toolbeschreibungen und die ausdrücklich zurückgegebenen Candidate-W
 Die `description` des Servers wird der Beschreibung seiner MCP-Tools vorangestellt,
 damit JEV den fachlichen Zweck des Servers bei der Tool-Auswahl berücksichtigen kann.
 
-Da MCP-Tools dynamisch geladen werden, ist `output.value` bei aktivem `mcpServer`
-als `unknown` typisiert. `output.confidence` bleibt vollständig typisiert. Lokale
-Tool-Werte werden ohne MCP aus den jeweiligen `func()`-Returns inferiert.
+Da MCP-Tools dynamisch geladen werden, ist `output.value` nach Narrowing auf einen
+erfolgreichen Return bei aktivem `mcpServer` als `unknown` typisiert. `output.tool`
+und `output.params` bleiben vollständig typisiert. Lokale Tool-Werte werden ohne
+MCP aus den jeweiligen `func()`-Returns inferiert.
 
 Weitere Details zum zugrunde liegenden Client:
 

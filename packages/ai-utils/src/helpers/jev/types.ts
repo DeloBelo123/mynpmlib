@@ -1,7 +1,7 @@
 import type { z } from "zod/v4"
 import type { BaseCheckpointSaver } from "../../imports"
 import type { MCPServerConfig } from "../../heart/tools/MCP"
-import type { JevEntry } from "../classify"
+import type { JevEntry, JevJsonValue } from "../classify"
 
 export type JevModel = `~typesafe/${string}`
 
@@ -107,12 +107,28 @@ export type JevToolCallerProps<
     contextSchema?: JevContextSchema & z.ZodType<TContext>
     /** Remote tools loaded and closed for every invoke. */
     mcpServer?: JevMCPServersInput<NoInfer<TContext>>
+    /**
+     * Human-in-the-Loop: pausiert vor `func()`-Ausführung. Value ist die
+     * Freigabe-Frage (String oder Function mit `{ tool, params, state, thread_id, context }`).
+     * Erfordert `checkpointer` + `thread_id` — sonst Throw im Constructor.
+     * Nur `approve`/`reject`; `func()` läuft bei Reject nie.
+     */
+    interruptOn?: JevInterruptOn<TTools, NoInfer<TContext>>
+    /**
+     * Qualitäts-Gate: immer aktiv. Effektiver Threshold pro Tool ist
+     * `tools[name] ?? minConfidence ?? 0.5`. Unterschreitet die Tool- oder eine
+     * Param-Confidence den Threshold, wird `func()` nicht ausgeführt und
+     * `invoke()` gibt `{ kind: "gated", ... }` zurück. `minConfidence: 0`
+     * schaltet den Gate faktisch ab.
+     */
+    confidenceGate?: JevGateConfig<TTools>
 }
 
 type JevToolCallerInvokeControls = {
     debug?: boolean
     thread_id?: string
     signal?: AbortSignal
+    decision?: JevUserDecision
     [key: string]: unknown
 }
 
@@ -123,25 +139,153 @@ export type JevToolCallerInvokeInput<
         ? { context?: never }
         : { context: TContext })
 
+/** v1: nur approve/reject — keine generierten Argumente, keine Edits. */
+export type JevUserDecision = "approve" | "reject"
+
+/** Untergrenze, wenn weder `minConfidence` noch ein Tool-Override gesetzt ist. */
+export const DEFAULT_MIN_CONFIDENCE = 0.5
+
+export interface JevToolSelection {
+    name: string
+    /** JEV tool-choice confidence; 1 wenn via `callTool()` explizit gewählt. */
+    confidence: number
+}
+
+export interface JevParamSelection {
+    value: JevEntry
+    /** JEV param-choice confidence; 1 wenn deterministisch oder explizit gewählt. */
+    confidence: number
+}
+
+export type JevToolNameOf<TTools extends readonly AnyJevTool[]> = {
+    [K in keyof TTools]: TTools[K] extends { name: infer TName extends string }
+        ? (string extends TName ? never : TName)
+        : never
+}[number]
+
+/** Kontext für `question`-Functions — läuft lokal, wird nie an JEV gesendet oder persistiert. */
+export interface JevInterruptQuestionContext<TContext = undefined> {
+    tool: string
+    params: Record<string, JevEntry>
+    state: JevToolCallerState
+    thread_id?: string
+    context: TContext
+}
+
+export type JevInterruptQuestion<TContext = undefined> =
+    | string
+    | ((call: JevInterruptQuestionContext<TContext>) => string | Promise<string>)
+
+/**
+ * HITL-Policy pro Tool. Keys sind Tool-Namen (Autocomplete für lokale Tools,
+ * freie Strings für dynamische `<server>__<tool>` MCP-Namen). Tools ohne
+ * Eintrag laufen ohne Pause direkt durch.
+ */
+export type JevInterruptOn<
+    TTools extends readonly AnyJevTool[] = readonly AnyJevTool[],
+    TContext = any,
+> = {
+    [K in JevToolNameOf<TTools>]?: JevInterruptQuestion<TContext>
+} & {
+    [toolName: string]: JevInterruptQuestion<TContext> | undefined
+}
+
+export type JevGateThresholds<
+    TTools extends readonly AnyJevTool[] = readonly AnyJevTool[],
+> = {
+    [K in JevToolNameOf<TTools>]?: number
+} & {
+    [toolName: string]: number | undefined
+}
+
+export interface JevGateConfig<
+    TTools extends readonly AnyJevTool[] = readonly AnyJevTool[],
+> {
+    /** Default-Threshold für jedes Tool; fallback ist `DEFAULT_MIN_CONFIDENCE`. */
+    minConfidence?: number
+    /** Per-Tool-Override: `tools[name] ?? minConfidence ?? 0.5`. */
+    tools?: JevGateThresholds<TTools>
+}
+
+export interface JevGateBreach {
+    scope: "tool" | `params.${string}`
+    confidence: number
+    required: number
+}
+
+/** Pause vor `func()` — wird per `decision` in einem zweiten `invoke()` fortgesetzt. */
+export interface JevInterrupt {
+    kind: "interrupt"
+    question: string
+    tool: JevToolSelection
+    params: Record<string, JevParamSelection>
+}
+
+/** Gate hat Nein gesagt — `func()` lief nicht. */
+export interface JevGatedResult {
+    kind: "gated"
+    tool: JevToolSelection
+    params: Record<string, JevParamSelection>
+    below: JevGateBreach[]
+}
+
+/** Manueller Ausführungspfad ohne JEV-Auswahl. */
+export type JevCallToolInput<
+    TTools extends readonly AnyJevTool[] = readonly AnyJevTool[],
+    TContext = undefined,
+> = {
+    debug?: boolean
+    thread_id?: string
+    signal?: AbortSignal
+    /** Tool-Name — Union lokaler Namen, freie Strings für `<server>__<tool>`. */
+    tool: JevToolNameOf<TTools> | (string & {})
+    /** Explizite Werte — werden gegen die Tool-Candidates validiert (bounded). */
+    params?: Record<string, JevEntry>
+} & ([TContext] extends [undefined]
+    ? { context?: never }
+    : { context: TContext }) & {
+    [key: string]: unknown
+}
+
+/** @internal Geparkter Vorschlag zwischen Propose und Resume — JSON-serialisierbar. */
+export interface JevInterruptPending {
+    toolName: string
+    params: Record<string, JevEntry>
+    userRequest: Record<string, JevJsonValue>
+    question: string
+    tool: JevToolSelection
+    paramSelections: Record<string, JevParamSelection>
+    toolMeta: {
+        confidence: number
+        probabilities: Record<string, number>
+    }
+    paramsMeta: Record<string, JevToolCallerSelectionMetadata>
+    usage: JevUsageAccumulator
+}
+
 export type JevToolReturn<TTools extends readonly AnyJevTool[]> = TTools[number]["func"] extends (
     ...args: any[]
 ) => infer TResult
     ? Awaited<TResult>
     : never
 
-/** Confidence values exposed on every successful `invoke()` result. */
-export interface JevToolCallerConfidence {
-    /** Confidence of the initial tool selection. */
-    toolChoice: number
-    /** Confidence per parameter that required a JEV choice. */
-    paramsChoice?: Readonly<Record<string, number>>
-}
-
-/** Stable result shape returned by `invoke()` with and without debug mode. */
-export interface JevToolCallerResult<TResult> {
-    value: TResult
-    confidence: JevToolCallerConfidence
-}
+/** Stabiler Result-Shape jedes `invoke()`/`callTool()`-Returns — immer mit `kind`. */
+export type JevToolCallerResult<TResult> =
+    | {
+        kind: "return"
+        value: TResult
+        tool: JevToolSelection
+        params: Record<string, JevParamSelection>
+        rejected?: false
+    }
+    | {
+        kind: "return"
+        /** `reject` — `func()` lief nie. */
+        value: null
+        tool: JevToolSelection
+        params: Record<string, JevParamSelection>
+        rejected: true
+    }
 
 /** @internal The raw value produced by the selected tool. */
 export type JevToolCallerValue<
@@ -181,7 +325,7 @@ export interface JevToolCallerUsage {
     cost?: number
 }
 
-export interface JevToolCallerDebugResult<TResult> extends JevToolCallerResult<TResult> {
+export type JevToolCallerDebugResult<TResult> = JevToolCallerResult<TResult> & {
     metadata: {
         selected_tool: {
             name: string

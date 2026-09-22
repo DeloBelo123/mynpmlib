@@ -73,6 +73,10 @@ test(
             })
             const totalDurationMs = performance.now() - totalStartedAt
 
+            assert.equal(output.kind, "return")
+            if (output.kind !== "return" || output.rejected) {
+                throw new Error("expected successful return")
+            }
             assert.equal(output.metadata.selected_tool.name, "find_product")
             assert.equal(output.metadata.selected_params.product.choice, "option_1")
             assert.equal(receivedProduct, blueProduct)

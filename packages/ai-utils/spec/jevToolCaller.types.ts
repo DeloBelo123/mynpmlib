@@ -3,6 +3,7 @@ import {
     JevToolCaller,
     type JevToolCallerResult,
 } from "../src/heart/jevToolCaller"
+import type { JevGatedResult, JevInterrupt } from "../src/helpers/jev"
 
 const contextSchema = z.object({
     sessionId: z.string(),
@@ -72,7 +73,7 @@ const mcpCaller = new JevToolCaller({
     },
 })
 
-const mcpResult: Promise<JevToolCallerResult<unknown>> = mcpCaller.invoke({
+const mcpResult: Promise<JevToolCallerResult<unknown> | JevGatedResult | JevInterrupt> = mcpCaller.invoke({
     request: "lookup",
     context: { sessionId: "s1", auth: { token: "secret" } },
 })
@@ -110,7 +111,7 @@ const callerWithoutContext = new JevToolCaller({
     ],
 })
 
-const pingResult: Promise<JevToolCallerResult<"pong">> = callerWithoutContext.invoke({
+const pingResult: Promise<JevToolCallerResult<"pong"> | JevGatedResult | JevInterrupt> = callerWithoutContext.invoke({
     request: "ping",
 })
 void pingResult

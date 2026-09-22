@@ -8,7 +8,7 @@ Kurzreferenz für Entwicklung und AI-Assistenten in `@delofarag/ai-utils`.
 |---|---|---|
 | `Chain` | `src/heart/chain.ts` | Stateless LLM-Calls mit Zod-Output, optional RAG |
 | `classify` | `src/helpers/classify.ts` | Typisierte JEV-Klassifikation (`noul`, `choice`, `score`) über OpenRouter |
-| `JevToolCaller` | `src/heart/jevToolCaller.ts` | Bounded JEV-Tool- und Runtime-Parameter-Auswahl ohne generiertes Argument-Schema |
+| `JevToolCaller` | `src/heart/jevToolCaller.ts` | Bounded JEV-Tool- und Runtime-Parameter-Auswahl ohne generiertes Argument-Schema; HITL (approve/reject) via `interruptOn`, Qualitäts-Gate, manueller `callTool()` |
 | JEV-Helper | `src/helpers/jev/` | Öffentliche Typen, Fehler und interne Hilfsfunktionen für `JevToolCaller` |
 | `Agent` | `src/heart/agent.ts` | Tool-using ReAct-Agent, optional Checkpointer + strukturierter Output |
 | `DeepAgent` | `src/heart/deepAgent.ts` | LangChain Deep Agent (Filesystem, Subagents, Sandboxes) |
@@ -89,10 +89,29 @@ direkt ein statisches Candidate-Objekt oder eine synchrone/asynchrone Funktion s
 Die aktuelle Anfrage ist der neueste `user`-Eintrag in `state.message_history`.
 `mcpServer` lädt zusätzlich präfixierte `<server>__<tool>`-Tools; optionale statische
 Choices oder Candidate-Provider stehen unter `mcpServer.params[unprefixedToolName]`.
-`invoke()` gibt immer `{ value, confidence }` zurück. `confidence.toolChoice`
-enthält die Tool-Auswahl-Confidence; `confidence.paramsChoice` enthält optional
-die Confidence pro tatsächlich durch JEV ausgewähltem Parameter. `debug: true`
-ergänzt `metadata`, verändert diese Basisform aber nicht.
+`invoke()` gibt immer `{ kind: "return", value, tool, params }` zurück
+(`value: null, rejected: true` bei Reject — `func()` lief nie).
+`tool` = `{ name, confidence }`, `params` = `{ [name]: { value, confidence } }`
+(Confidence `1` bei deterministischen Single-Candidates, kein JEV-Call).
+`debug: true` ergänzt `metadata`, verändert diese Basisform aber nicht.
+
+HITL (nur approve/reject): `new JevToolCaller({ tools, checkpointer,
+interruptOn: { toolName: "Frage?" | (call) => "Frage?" } })`. Propose gibt
+`{ kind: "interrupt", question, tool, params }` zurück und parkt den Vorschlag
+im Checkpointer (`jev_pending`-Channel); Resume via
+`invoke({ thread_id, context, decision })`. `func()` läuft bei Reject nie und
+bleibt unverändert. `context` wird nie persistiert und muss beim Resume erneut
+übergeben werden. Tools ohne `interruptOn`-Eintrag laufen direkt durch.
+`interruptOn` braucht `checkpointer` (sonst Throw im Constructor).
+
+Qualitäts-Gate (immer aktiv): `confidenceGate: { minConfidence?, tools? }`,
+effektiver Threshold `tools[name] ?? minConfidence ?? 0.5`
+(`DEFAULT_MIN_CONFIDENCE`, `minConfidence: 0` = aus). Bei Unterschreitung
+`{ kind: "gated", tool, params, below }` ohne Ausführung — läuft vor
+`interruptOn`. `callTool({ request..., thread_id, context, tool, params })`
+führt manuell aus (bounded-validiert gegen Candidates, mit History, ohne Gate
+und Interrupt). MCP-Namen sind `<server>__<tool>`; unmatchende Policy-Keys
+warnen per `console.warn`.
 
 ## Tool-Registry
 

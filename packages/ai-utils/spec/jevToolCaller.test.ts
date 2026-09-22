@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { z } from "zod/v4"
-import { MemorySaver } from "../src/imports"
+import { MemorySaver, MultiServerMCPClient } from "../src/imports"
 import {
     JevNoParamOptionsError,
     JevToolCaller,
@@ -105,13 +105,17 @@ test("selects the correct tool and original runtime value without exposing conte
             (runtimeContextReference as { state: unknown }).state,
             (funcContextReference as { state: unknown }).state,
         )
+        assert.equal(output.kind, "return")
+        if (output.kind !== "return" || output.rejected) {
+            throw new Error("expected successful return")
+        }
         assert.deepEqual(output.value, {
             product: selectedProduct,
             tenantId: "tenant-acme",
         })
-        assert.deepEqual(output.confidence, {
-            toolChoice: 0.99,
-            paramsChoice: { product: 0.98 },
+        assert.deepEqual(output.tool, { name: "find_product", confidence: 0.99 })
+        assert.deepEqual(output.params, {
+            product: { value: selectedProduct, confidence: 0.98 },
         })
         assert.equal(output.metadata.selected_tool.name, "find_product")
         assert.equal(output.metadata.selected_params.product.choice, "option_1")
@@ -181,7 +185,9 @@ test("executes a tool without params directly with an empty function params obje
 
         assert.deepEqual(result, {
             value: "pong:s1",
-            confidence: { toolChoice: 1 },
+            tool: { name: "ping", confidence: 1 },
+            params: {},
+            kind: "return",
         })
         assert.equal(calls, 1)
         assert.deepEqual(toolInput?.params, {})
@@ -255,10 +261,14 @@ test("selects an argument from a static params object", async () => {
             request: "Write the update.",
         })
 
+        assert.equal(output.kind, "return")
+        if (output.kind !== "return" || output.rejected) {
+            throw new Error("expected successful return")
+        }
         assert.equal(output.value, "write")
-        assert.deepEqual(output.confidence, {
-            toolChoice: 1,
-            paramsChoice: { permission: 1 },
+        assert.deepEqual(output.tool, { name: "take_action", confidence: 1 })
+        assert.deepEqual(output.params, {
+            permission: { value: "write", confidence: 1 },
         })
         assert.equal(calls, 2)
     } finally {
@@ -464,6 +474,360 @@ test("adapts prefixed MCP tools and applies params from their server", async () 
         await staticTool.func({ ...runtimeContext, params: { limit: { value: 25 } } }),
         { limit: { value: 25 } },
     )
+})
+
+test("confidenceGate blocks low tool confidence and reports below", async () => {
+    const originalFetch = globalThis.fetch
+    const originalApiKey = process.env.OPENROUTER_API_KEY
+    process.env.OPENROUTER_API_KEY = "test-key"
+    let funcCalled = false
+    globalThis.fetch = async () => new Response(JSON.stringify({
+        answers: {
+            tool: {
+                type: "choice",
+                choice: "ping",
+                confidence: 0.4,
+                probabilities: { ping: 0.4 },
+            },
+        },
+        model: "jev-test",
+        usage: { input_tokens: 4, output_tokens: 1 },
+    }), { status: 200 })
+    try {
+        const caller = new JevToolCaller({
+            tools: [{
+                name: "ping",
+                description: "Returns pong.",
+                func: async () => {
+                    funcCalled = true
+                    return "pong"
+                },
+            }],
+            confidenceGate: { minConfidence: 0.9 },
+        })
+        const result = await caller.invoke({ request: "ping" })
+        assert.equal(result.kind, "gated")
+        if (result.kind !== "gated") throw new Error("expected gated")
+        assert.deepEqual(result.below, [{ scope: "tool", confidence: 0.4, required: 0.9 }])
+        assert.equal(funcCalled, false)
+    } finally {
+        globalThis.fetch = originalFetch
+        if (originalApiKey === undefined) delete process.env.OPENROUTER_API_KEY
+        else process.env.OPENROUTER_API_KEY = originalApiKey
+    }
+})
+
+test("confidenceGate blocks low param confidence but minConfidence 0 executes", async () => {
+    const originalFetch = globalThis.fetch
+    const originalApiKey = process.env.OPENROUTER_API_KEY
+    process.env.OPENROUTER_API_KEY = "test-key"
+    let calls = 0
+    const jevFetch = (toolConf: number, paramConf: number) => async () => {
+        calls++
+        const response = calls === 1
+            ? {
+                  answers: {
+                      tool: {
+                          type: "choice",
+                          choice: "take_action",
+                          confidence: toolConf,
+                          probabilities: { take_action: toolConf },
+                      },
+                  },
+                  model: "jev-test",
+                  usage: { input_tokens: 4, output_tokens: 1 },
+              }
+            : {
+                  answers: {
+                      permission: {
+                          type: "choice",
+                          choice: "option_1",
+                          confidence: paramConf,
+                          probabilities: { option_0: 0.8, option_1: paramConf },
+                      },
+                  },
+                  model: "jev-test",
+                  usage: { input_tokens: 3, output_tokens: 1 },
+              }
+        return new Response(JSON.stringify(response), { status: 200 })
+    }
+    try {
+        let funcCalled = false
+        const makeCaller = (confidenceGate: { minConfidence: number }) => new JevToolCaller({
+            tools: [{
+                name: "take_action",
+                description: "Takes an action.",
+                params: { permission: ["read", "write"] },
+                func: async ({ params }) => {
+                    funcCalled = true
+                    return params.permission
+                },
+            }],
+            confidenceGate,
+        })
+        calls = 0
+        funcCalled = false
+        globalThis.fetch = jevFetch(0.99, 0.2)
+        const gated = await makeCaller({ minConfidence: 0.5 }).invoke({ request: "Write." })
+        assert.equal(gated.kind, "gated")
+        if (gated.kind !== "gated") throw new Error("expected gated")
+        assert.deepEqual(gated.below, [{ scope: "params.permission", confidence: 0.2, required: 0.5 }])
+        assert.equal(funcCalled, false)
+
+        calls = 0
+        funcCalled = false
+        globalThis.fetch = jevFetch(0.1, 0.1)
+        const executed = await makeCaller({ minConfidence: 0 }).invoke({ request: "Write." })
+        assert.equal(executed.kind, "return")
+        if (executed.kind !== "return" || executed.rejected) throw new Error("expected return")
+        assert.equal(executed.value, "write")
+        assert.equal(funcCalled, true)
+    } finally {
+        globalThis.fetch = originalFetch
+        if (originalApiKey === undefined) delete process.env.OPENROUTER_API_KEY
+        else process.env.OPENROUTER_API_KEY = originalApiKey
+    }
+})
+
+test("HITL approve resumes via a new caller instance and clears pending", async () => {
+    const originalFetch = globalThis.fetch
+    const originalApiKey = process.env.OPENROUTER_API_KEY
+    process.env.OPENROUTER_API_KEY = "test-key"
+    globalThis.fetch = async () => new Response(JSON.stringify({
+        answers: {
+            tool: { type: "choice", choice: "danger", confidence: 1, probabilities: { danger: 1 } },
+        },
+        model: "jev-test",
+        usage: { input_tokens: 4, output_tokens: 1 },
+    }), { status: 200 })
+    try {
+        const checkpointer = new MemorySaver()
+        const tools = [{
+            name: "danger",
+            description: "Dangerous action.",
+            func: async () => "done",
+        }] as const
+        const interruptOn = { danger: "Allow?" } as const
+        const proposer = new JevToolCaller({ tools, checkpointer, interruptOn })
+        const proposed = await proposer.invoke({ request: "do it", thread_id: "hitl-approve" })
+        assert.equal(proposed.kind, "interrupt")
+        const resumer = new JevToolCaller({ tools, checkpointer, interruptOn })
+        const approved = await resumer.invoke({ thread_id: "hitl-approve", decision: "approve" })
+        assert.equal(approved.kind, "return")
+        if (approved.kind !== "return" || approved.rejected) throw new Error("expected approve")
+        assert.equal(approved.value, "done")
+        await assert.rejects(
+            resumer.invoke({ thread_id: "hitl-approve", decision: "approve" }),
+            /No pending interrupt/,
+        )
+    } finally {
+        globalThis.fetch = originalFetch
+        if (originalApiKey === undefined) delete process.env.OPENROUTER_API_KEY
+        else process.env.OPENROUTER_API_KEY = originalApiKey
+    }
+})
+
+test("HITL reject works without resolving the pending tool", async () => {
+    const originalFetch = globalThis.fetch
+    const originalApiKey = process.env.OPENROUTER_API_KEY
+    process.env.OPENROUTER_API_KEY = "test-key"
+    let dangerCalls = 0
+    globalThis.fetch = async () => new Response(JSON.stringify({
+        answers: {
+            tool: { type: "choice", choice: "danger", confidence: 1, probabilities: { danger: 1 } },
+        },
+        model: "jev-test",
+        usage: { input_tokens: 4, output_tokens: 1 },
+    }), { status: 200 })
+    try {
+        const checkpointer = new MemorySaver()
+        const proposer = new JevToolCaller({
+            tools: [{
+                name: "danger",
+                description: "Dangerous action.",
+                func: async () => {
+                    dangerCalls++
+                    return "must-not-run"
+                },
+            }],
+            checkpointer,
+            interruptOn: { danger: "Allow?" },
+        })
+        const proposed = await proposer.invoke({ request: "do it", thread_id: "hitl-reject" })
+        assert.equal(proposed.kind, "interrupt")
+        globalThis.fetch = async () => {
+            throw new Error("reject must not call JEV")
+        }
+        const resumer = new JevToolCaller({
+            tools: [{
+                name: "other",
+                description: "Unrelated tool.",
+                func: async () => "other",
+            }],
+            checkpointer,
+            interruptOn: { danger: "Allow?" },
+        })
+        const rejected = await resumer.invoke({ thread_id: "hitl-reject", decision: "reject" })
+        assert.equal(rejected.kind, "return")
+        if (rejected.kind !== "return" || !rejected.rejected) throw new Error("expected reject")
+        assert.equal(rejected.value, null)
+        assert.equal(dangerCalls, 0)
+        await assert.rejects(
+            resumer.invoke({ thread_id: "hitl-reject", decision: "reject" }),
+            /No pending interrupt/,
+        )
+    } finally {
+        globalThis.fetch = originalFetch
+        if (originalApiKey === undefined) delete process.env.OPENROUTER_API_KEY
+        else process.env.OPENROUTER_API_KEY = originalApiKey
+    }
+})
+
+test("callTool validates bounded params including structurally equal objects", async () => {
+    const filterA = { tag: "a", nested: { ids: [1, 2] } }
+    const filterB = { tag: "b", nested: { ids: [3] } }
+    const caller = new JevToolCaller({
+        tools: [{
+            name: "search",
+            description: "Searches with a filter.",
+            params: { filter: [filterA, filterB] },
+            func: async ({ params }) => params.filter,
+        }],
+        checkpointer: new MemorySaver(),
+        confidenceGate: { minConfidence: 1 },
+        interruptOn: { search: "Allow?" },
+    })
+    const ok = await caller.callTool({
+        request: "manual",
+        thread_id: "calltool-bounded",
+        tool: "search",
+        params: { filter: { tag: "a", nested: { ids: [1, 2] } } },
+    })
+    assert.equal(ok.kind, "return")
+    if (ok.kind !== "return" || ok.rejected) throw new Error("expected return")
+    assert.deepEqual(ok.value, filterA)
+    assert.deepEqual(ok.tool, { name: "search", confidence: 1 })
+    await assert.rejects(
+        caller.callTool({
+            request: "manual",
+            thread_id: "calltool-bounded",
+            tool: "search",
+            params: { filter: { tag: "zzz", nested: { ids: [] } } },
+        }),
+        /not one of its candidates/,
+    )
+    await assert.rejects(
+        caller.callTool({ request: "manual", thread_id: "calltool-bounded", tool: "search", params: {} }),
+        /Missing parameter/,
+    )
+    await assert.rejects(
+        caller.callTool({
+            request: "manual",
+            thread_id: "calltool-bounded",
+            tool: "search",
+            params: { filter: filterA, extra: 1 } as any,
+        }),
+        /Unknown parameter/,
+    )
+})
+
+test("MCP approve keeps the client open until after func; reject needs no MCP", async () => {
+    const originalFetch = globalThis.fetch
+    const originalApiKey = process.env.OPENROUTER_API_KEY
+    process.env.OPENROUTER_API_KEY = "test-key"
+    globalThis.fetch = async () => new Response(JSON.stringify({
+        answers: {
+            tool: {
+                type: "choice",
+                choice: "srv__remote",
+                confidence: 1,
+                probabilities: { srv__remote: 1 },
+            },
+        },
+        model: "jev-test",
+        usage: { input_tokens: 4, output_tokens: 1 },
+    }), { status: 200 })
+    const proto = MultiServerMCPClient.prototype as unknown as {
+        getTools: (...args: unknown[]) => Promise<unknown[]>
+        close: (...args: unknown[]) => Promise<void>
+    }
+    const originalGetTools = proto.getTools
+    const originalClose = proto.close
+    const events: string[] = []
+    const fakeRemoteTool = {
+        name: "srv__remote",
+        description: "Remote tool.",
+        invoke: async (args: unknown) => {
+            events.push("invoke")
+            return { echo: args }
+        },
+    }
+    proto.getTools = async function () {
+        events.push("getTools")
+        return [fakeRemoteTool]
+    }
+    proto.close = async function () {
+        events.push("close")
+    }
+    try {
+        const checkpointer = new MemorySaver()
+        const mcpServer = { name: "srv", url: "https://example.com/mcp", description: "S." } as const
+        const proposer = new JevToolCaller({
+            tools: [],
+            mcpServer,
+            checkpointer,
+            interruptOn: { srv__remote: "Allow remote?" },
+        })
+        const proposed = await proposer.invoke({ request: "go", thread_id: "mcp-hitl" })
+        assert.equal(proposed.kind, "interrupt")
+        events.length = 0
+        const resumer = new JevToolCaller({
+            tools: [],
+            mcpServer,
+            checkpointer,
+            interruptOn: { srv__remote: "Allow remote?" },
+        })
+        const approved = await resumer.invoke({ thread_id: "mcp-hitl", decision: "approve" })
+        assert.equal(approved.kind, "return")
+        if (approved.kind !== "return" || approved.rejected) throw new Error("expected approve")
+        assert.deepEqual(approved.value, { echo: {} })
+        assert.deepEqual(events, ["getTools", "invoke", "close"])
+
+        const proposedOffline = await proposer.invoke({ request: "go", thread_id: "mcp-offline" })
+        assert.equal(proposedOffline.kind, "interrupt")
+        events.length = 0
+        proto.getTools = async function () {
+            events.push("getTools")
+            throw new Error("mcp offline")
+        }
+        await assert.rejects(
+            resumer.invoke({ thread_id: "mcp-offline", decision: "approve" }),
+            /mcp offline/,
+        )
+        assert.deepEqual(events, ["getTools", "close"])
+        proto.getTools = async function () {
+            events.push("getTools")
+            return [fakeRemoteTool]
+        }
+
+        const proposedReject = await proposer.invoke({ request: "go", thread_id: "mcp-reject" })
+        assert.equal(proposedReject.kind, "interrupt")
+        events.length = 0
+        proto.getTools = async function () {
+            events.push("getTools-fail")
+            throw new Error("mcp offline")
+        }
+        const rejected = await resumer.invoke({ thread_id: "mcp-reject", decision: "reject" })
+        assert.equal(rejected.kind, "return")
+        if (rejected.kind !== "return" || !rejected.rejected) throw new Error("expected reject")
+        assert.deepEqual(events, [])
+    } finally {
+        proto.getTools = originalGetTools
+        proto.close = originalClose
+        globalThis.fetch = originalFetch
+        if (originalApiKey === undefined) delete process.env.OPENROUTER_API_KEY
+        else process.env.OPENROUTER_API_KEY = originalApiKey
+    }
 })
 
 test("rejects invalid context before making a JEV request", async () => {

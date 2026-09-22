@@ -55,8 +55,7 @@ export function toStoredJevValue(value: unknown): JevJsonValue {
     }
 }
 
-export function parseJevHistoryContent(content: string): JevEntry {
-    try {
+export function parseJevHistoryContent(content: string): JevEntry {    try {
         const parsed = JSON.parse(content) as unknown
         if (
             parsed === null ||
@@ -70,4 +69,23 @@ export function parseJevHistoryContent(content: string): JevEntry {
         // Plain text from checkpoints created by another runtime remains plain text.
     }
     return content
+}
+
+export function deepEqualJev(left: JevJsonValue | undefined, right: JevJsonValue | undefined): boolean {
+    if (left === right) return true
+    if (typeof left !== typeof right) return false
+    if (left === null || right === null) return false
+    if (typeof left !== "object" || typeof right !== "object") return false
+    if (Array.isArray(left) || Array.isArray(right)) {
+        if (!Array.isArray(left) || !Array.isArray(right)) return false
+        if (left.length !== right.length) return false
+        return left.every((item, index) => deepEqualJev(item, right[index]))
+    }
+    const leftRecord = left as Record<string, JevJsonValue>
+    const rightRecord = right as Record<string, JevJsonValue>
+    const leftKeys = Object.keys(leftRecord)
+    if (leftKeys.length !== Object.keys(rightRecord).length) return false
+    return leftKeys.every(key =>
+        Object.hasOwn(rightRecord, key) && deepEqualJev(leftRecord[key], rightRecord[key]),
+    )
 }
